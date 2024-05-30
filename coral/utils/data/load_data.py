@@ -14,8 +14,8 @@ from scipy import io
 from torch.utils.data import Dataset
 
 # MP-PDE imports
-from equations.PDEs import CE
-from common.utils import HDF5Dataset
+# from equations.PDEs import CE
+# from common.utils import HDF5Dataset
 from coral.utils.data.setting import init_setting
 
 # if dataset_name == "shallow-water":
@@ -351,6 +351,32 @@ def get_dynamics_data(
     elif dataset_name == "navier-stokes-dino":
         u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino(data_dir, seq_inter_len, seq_extra_len)
 
+    elif dataset_name == "navier-stokes-dino-40-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_last40_total64(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_total64(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-40-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total64(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-40-64-wonorm":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total64_wonorm(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms-f40-64-wonorm":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_first40_total64_wonorm(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-f40-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_first40_total64(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-40-60":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total60(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms-40-70":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total70(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "sst-11-22":
+        u_train, u_eval_extrapolation, u_test = get_sst_11_22(data_dir, seq_inter_len, seq_extra_len)
+
     elif dataset_name == "shallow-water-dino":
         u_train, u_eval_extrapolation, u_test = get_shallow_water_dino(data_dir, seq_inter_len, seq_extra_len)
 
@@ -390,6 +416,7 @@ def get_dynamics_data(
     grid_te = einops.repeat(
         grid_te, "... -> b ... t", t=u_test.shape[-1], b=u_test.shape[0]
     )
+    # import pdb; pdb.set_trace()
     if isinstance(sub_from, int):
         grid_tr = dynamics_subsample(grid_tr, sub_from)
         u_train = dynamics_subsample(u_train, sub_from)
@@ -402,9 +429,9 @@ def get_dynamics_data(
         grid_te = dynamics_subsample(grid_te, sub_from)
         u_test = dynamics_subsample(u_test, sub_from)
 
-    if isinstance(sub_from, int):
-        grid_tr = dynamics_subsample(grid_tr, sub_from)
-        u_train = dynamics_subsample(u_train, sub_from)
+    # if isinstance(sub_from, int):
+    #     grid_tr = dynamics_subsample(grid_tr, sub_from)
+    #     u_train = dynamics_subsample(u_train, sub_from)
 
     if isinstance(sub_tr, int):
         grid_tr = dynamics_subsample(grid_tr, sub_tr)
@@ -804,6 +831,36 @@ def get_shallow_water(filename, ntrain, ntest, min_sub=1):
 
     return x_train, y_train, x_test, y_test
 
+def get_sst_11_22(filename, seq_inter_len=11, seq_extra_len=11):
+   
+    train_path = str(filename)
+    h5_data = h5py.File(train_path, 'r')
+    data = h5_data['mygroup']['mydataset'][:]
+    h5_data.close()
+    data = data.transpose(2,1,0)
+    # 4459 * 64 * 64
+    # 4459 = 4444 + 15 = 202 * 22 + 15 = (180 + 22) * 22 + 15
+    data = data[:4444].reshape(202, 22, 64, 64) 
+
+    u_train = torch.tensor(data[:180,:,:,:]).float()
+    u_test = torch.tensor(data[180:,:,:,:]).float()
+
+    u_min = u_train.min()
+    u_max = u_train.max()
+    # u_train = (u_train-u_min) / (u_max-u_min)
+    # u_test = (u_test-u_min) / (u_max-u_min)
+    print(u_min, u_max, u_test.min(), u_test.max())
+
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 22)
 
 def get_navier_stokes_fno(filename, ntrain=1000, ntest=200, sequence_length=None, index_start=None):
     # reader = MatReader(data_dir / "NavierStokes_V1e-5_N1200_T20.mat")
@@ -835,9 +892,385 @@ def get_navier_stokes_fno(filename, ntrain=1000, ntest=200, sequence_length=None
     return u_train.unsqueeze(-2), u_test.unsqueeze(-2)
 
 
+def get_navier_stokes_nms_total64(filename, seq_inter_len=20, seq_extra_len=20):
+    # train_path = str(filename) + "/dino/navier_1e-3_256_2_train.shelve"
+    # test_path = str(filename) + "/dino/navier_1e-3_256_2_test.shelve"
+
+    
+    train_path = str(filename)
+    test_path = train_path[:-4] + '_test' + train_path[-4:]
+
+
+    data_train = np.load(train_path)
+    data_test = np.load(test_path)
+
+    # data_train.pop("a")
+    # data_train.pop("t")
+    # data_test.pop("a")
+    # data_test.pop("t")
+
+    # concatenate dictionaries to be of shape (ntrain, 40, 256, 256)
+    #  u = einops.rearrange(u, 'b (t d) w l -> (b d) t w l', d=2)
+    # u_train = torch.tensor(
+    #     np.concatenate(
+    #         list(
+    #             map(
+    #                 lambda key: np.array(data_train[key]["data"]),
+    #                 data_train.keys(),
+    #             )
+    #         )
+    #     )
+    # )
+    # u_test = torch.tensor(
+    #     np.concatenate(
+    #         list(
+    #             map(
+    #                 lambda key: np.array(data_test[key]["data"]),
+    #                 data_test.keys(),
+    #             )
+    #         )
+    #     )
+    # )
+    # debug
+    # u_train = torch.tensor(data_train[0:1,16:,:-1,:-1,0])
+    # u_min = u_train.min()
+    # u_max = u_train.max()
+    # u_train = (u_train-u_min) / (u_max-u_min)
+    # u_test = torch.tensor(data_test[0:1,16:,:-1,:-1,0])
+    # u_test = (u_test-u_min) / (u_max-u_min)
+    u_train = torch.tensor(data_train[:,:,:-1,:-1,0])
+    u_test = torch.tensor(data_test[:,:,:-1,:-1,0])
+
+    u_min = u_train.min()
+    u_max = u_train.max()
+    u_train = (u_train-u_min) / (u_max-u_min)
+    u_test = (u_test-u_min) / (u_max-u_min)
+    print(u_min, u_max, u_test.min(), u_test.max())
+
+    # firstT40
+    # u_train = u_train[:, :40]
+    # u_test = u_test[:, :40]
+    
+    # lastT40
+    # u_train = u_train[:, 24:]
+    # u_test = u_test[:, 24:]
+
+    # if sequence_length is not None:
+    #     u_train = einops.rearrange(
+    #         u_train, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+    #     u_test = einops.rearrange(
+    #         u_test, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 64)
+
+def get_navier_stokes_nms(filename, seq_inter_len=20, seq_extra_len=20):
+    # train_path = str(filename) + "/dino/navier_1e-3_256_2_train.shelve"
+    # test_path = str(filename) + "/dino/navier_1e-3_256_2_test.shelve"
+
+    
+    train_path = str(filename)
+    test_path = train_path[:-4] + '_test' + train_path[-4:]
+
+
+    data_train = np.load(train_path)
+    data_test = np.load(test_path)
+
+    # data_train.pop("a")
+    # data_train.pop("t")
+    # data_test.pop("a")
+    # data_test.pop("t")
+
+    # concatenate dictionaries to be of shape (ntrain, 40, 256, 256)
+    #  u = einops.rearrange(u, 'b (t d) w l -> (b d) t w l', d=2)
+    # u_train = torch.tensor(
+    #     np.concatenate(
+    #         list(
+    #             map(
+    #                 lambda key: np.array(data_train[key]["data"]),
+    #                 data_train.keys(),
+    #             )
+    #         )
+    #     )
+    # )
+    # u_test = torch.tensor(
+    #     np.concatenate(
+    #         list(
+    #             map(
+    #                 lambda key: np.array(data_test[key]["data"]),
+    #                 data_test.keys(),
+    #             )
+    #         )
+    #     )
+    # )
+    # debug
+    # u_train = torch.tensor(data_train[0:1,16:,:-1,:-1,0])
+    # u_min = u_train.min()
+    # u_max = u_train.max()
+    # u_train = (u_train-u_min) / (u_max-u_min)
+    # u_test = torch.tensor(data_test[0:1,16:,:-1,:-1,0])
+    # u_test = (u_test-u_min) / (u_max-u_min)
+    u_train = torch.tensor(data_train[:,:,:-1,:-1,0])
+    u_test = torch.tensor(data_test[:,:,:-1,:-1,0])
+
+    u_min = u_train.min()
+    u_max = u_train.max()
+    u_train = (u_train-u_min) / (u_max-u_min)
+    u_test = (u_test-u_min) / (u_max-u_min)
+    print(u_min, u_max, u_test.min(), u_test.max())
+
+    # firstT40
+    u_train = u_train[:, :40]
+    u_test = u_test[:, :40]
+    
+    # lastT40
+    # u_train = u_train[:, 24:]
+    # u_test = u_test[:, 24:]
+
+    # if sequence_length is not None:
+    #     u_train = einops.rearrange(
+    #         u_train, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+    #     u_test = einops.rearrange(
+    #         u_test, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
+
+def get_navier_stokes_nms_last40_total60(filename, seq_inter_len=20, seq_extra_len=20):
+   
+    train_path = str(filename)
+    test_path = train_path[:-4] + '_test' + train_path[-4:]
+
+    data_train = np.load(train_path)
+    data_test = np.load(test_path)
+
+    u_train = torch.tensor(data_train[:,:,:-1,:-1,0])
+    u_test = torch.tensor(data_test[:,:,:-1,:-1,0])
+
+    u_min = u_train.min()
+    u_max = u_train.max()
+    # u_train = (u_train-u_min) / (u_max-u_min)
+    # u_test = (u_test-u_min) / (u_max-u_min)
+    print(u_min, u_max, u_test.min(), u_test.max())
+
+    # firstT40
+    # u_train = u_train[:, :40]
+    # u_test = u_test[:, :40]
+    
+    # lastT40
+    u_train = u_train[:, 20:]
+    u_test = u_test[:, 20:]
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
+
+def get_navier_stokes_nms_last40_total64(filename, seq_inter_len=20, seq_extra_len=20):
+   
+    train_path = str(filename)
+    test_path = train_path[:-4] + '_test' + train_path[-4:]
+
+    data_train = np.load(train_path)
+    data_test = np.load(test_path)
+
+    u_train = torch.tensor(data_train[:,:,:-1,:-1,0])
+    u_test = torch.tensor(data_test[:,:,:-1,:-1,0])
+
+    u_min = u_train.min()
+    u_max = u_train.max()
+    u_train = (u_train-u_min) / (u_max-u_min)
+    u_test = (u_test-u_min) / (u_max-u_min)
+    print(u_min, u_max, u_test.min(), u_test.max())
+
+    # firstT40
+    # u_train = u_train[:, :40]
+    # u_test = u_test[:, :40]
+    
+    # lastT40
+    u_train = u_train[:, 24:]
+    u_test = u_test[:, 24:]
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
+
+def get_navier_stokes_nms_first40_total64(filename, seq_inter_len=20, seq_extra_len=20):
+   
+    train_path = str(filename)
+    test_path = train_path[:-4] + '_test' + train_path[-4:]
+
+    data_train = np.load(train_path)
+    data_test = np.load(test_path)
+
+    u_train = torch.tensor(data_train[:,:,:-1,:-1,0])
+    u_test = torch.tensor(data_test[:,:,:-1,:-1,0])
+
+    u_min = u_train.min()
+    u_max = u_train.max()
+    u_train = (u_train-u_min) / (u_max-u_min)
+    u_test = (u_test-u_min) / (u_max-u_min)
+    print(u_min, u_max, u_test.min(), u_test.max())
+
+    # firstT40
+    # u_train = u_train[:, :40]
+    # u_test = u_test[:, :40]
+    
+    # lastT40
+    u_train = u_train[:, :40]
+    u_test = u_test[:, :40]
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
+
+
+def get_navier_stokes_nms_first40_total64_wonorm(filename, seq_inter_len=20, seq_extra_len=20):
+   
+    train_path = str(filename)
+    test_path = train_path[:-4] + '_test' + train_path[-4:]
+
+    data_train = np.load(train_path)
+    data_test = np.load(test_path)
+
+    u_train = torch.tensor(data_train[:,:,:-1,:-1,0])
+    u_test = torch.tensor(data_test[:,:,:-1,:-1,0])
+
+    u_min = u_train.min()
+    u_max = u_train.max()
+    # u_train = (u_train-u_min) / (u_max-u_min)
+    # u_test = (u_test-u_min) / (u_max-u_min)
+    print(u_min, u_max, u_test.min(), u_test.max())
+
+    # firstT40
+    # u_train = u_train[:, :40]
+    # u_test = u_test[:, :40]
+    
+    # lastT40
+    u_train = u_train[:, :40]
+    u_test = u_test[:, :40]
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
+
+def get_navier_stokes_nms_last40_total64_wonorm(filename, seq_inter_len=20, seq_extra_len=20):
+   
+    train_path = str(filename)
+    test_path = train_path[:-4] + '_test' + train_path[-4:]
+
+    data_train = np.load(train_path)
+    data_test = np.load(test_path)
+
+    u_train = torch.tensor(data_train[:,:,:-1,:-1,0])
+    u_test = torch.tensor(data_test[:,:,:-1,:-1,0])
+
+    u_min = u_train.min()
+    u_max = u_train.max()
+    # u_train = (u_train-u_min) / (u_max-u_min)
+    # u_test = (u_test-u_min) / (u_max-u_min)
+    print(u_min, u_max, u_test.min(), u_test.max())
+
+    # firstT40
+    # u_train = u_train[:, :40]
+    # u_test = u_test[:, :40]
+    
+    # lastT40
+    u_train = u_train[:, 24:]
+    u_test = u_test[:, 24:]
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
+
+def get_navier_stokes_nms_last40_total70(filename, seq_inter_len=20, seq_extra_len=20):
+   
+    train_path = str(filename)
+    test_path = train_path[:-4] + '_test' + train_path[-4:]
+
+    data_train = np.load(train_path)
+    data_test = np.load(test_path)
+
+    u_train = torch.tensor(data_train[:,:,:-1,:-1,0])
+    u_test = torch.tensor(data_test[:,:,:-1,:-1,0])
+
+    u_min = u_train.min()
+    u_max = u_train.max()
+    # u_train = (u_train-u_min) / (u_max-u_min)
+    # u_test = (u_test-u_min) / (u_max-u_min)
+    print(u_min, u_max, u_test.min(), u_test.max())
+
+    # firstT40
+    # u_train = u_train[:, :40]
+    # u_test = u_test[:, :40]
+    
+    # lastT40
+    u_train = u_train[:, 30:]
+    u_test = u_test[:, 30:]
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
+
 def get_navier_stokes_dino(filename, seq_inter_len=20, seq_extra_len=20):
-    train_path = str(filename) + "/dino/navier_1e-3_256_2_train.shelve"
-    test_path = str(filename) + "/dino/navier_1e-3_256_2_test.shelve"
+    # train_path = str(filename) + "/dino/navier_1e-3_256_2_train.shelve"
+    # test_path = str(filename) + "/dino/navier_1e-3_256_2_test.shelve"
+
+    train_path = str(filename) + '/navier_stokes/navier_1e-3_first30_train.shelve'
+    test_path = str(filename) + '/navier_stokes/navier_1e-3_first30_test.shelve'
 
     data_train = dict(shelve.open(str(train_path)))
     data_test = dict(shelve.open(str(test_path)))
@@ -870,6 +1303,10 @@ def get_navier_stokes_dino(filename, seq_inter_len=20, seq_extra_len=20):
         )
     )
 
+    u_min = u_train.min()
+    u_max = u_train.max()
+    print(u_min, u_max, u_test.min(), u_test.max())
+
     # if sequence_length is not None:
     #     u_train = einops.rearrange(
     #         u_train, "b (d t) w h -> (b d) t w h", t=sequence_length
@@ -881,10 +1318,72 @@ def get_navier_stokes_dino(filename, seq_inter_len=20, seq_extra_len=20):
     u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
     u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
 
+    print(u_train.shape)
+    print(u_test.shape)
+
     # output of shape (N, Dx, Dy, 1, T)
 
     return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
 
+
+def get_navier_stokes_dino_last40_total64(filename, seq_inter_len=20, seq_extra_len=20):
+   
+    train_path = str(filename)
+    # test_path = train_path[:-4] + '_test' + train_path[-4:]
+    test_path = train_path.replace('train', 'test')
+
+    data_train = dict(shelve.open(str(train_path)))
+    data_test = dict(shelve.open(str(test_path)))
+
+    # data_train = np.load(train_path)
+    # data_test = np.load(test_path)
+    u_train = torch.tensor(
+        np.concatenate(
+            list(
+                map(
+                    lambda key: np.array(data_train[key]["data"]),
+                    data_train.keys(),
+                )
+            )
+        )
+    )
+    u_test = torch.tensor(
+        np.concatenate(
+            list(
+                map(
+                    lambda key: np.array(data_test[key]["data"]),
+                    data_test.keys(),
+                )
+            )
+        )
+    )
+
+    # u_train = torch.tensor(data_train[:,:,:-1,:-1,0])
+    # u_test = torch.tensor(data_test[:,:,:-1,:-1,0])
+
+    u_min = u_train.min()
+    u_max = u_train.max()
+    u_train = (u_train-u_min) / (u_max-u_min)
+    u_test = (u_test-u_min) / (u_max-u_min)
+    print(u_min, u_max, u_test.min(), u_test.max())
+
+    # firstT40
+    # u_train = u_train[:, :40]
+    # u_test = u_test[:, :40]
+    
+    # lastT40
+    # u_train = u_train[:, 24:]
+    # u_test = u_test[:, 24:]
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
 
 def split_data(u_train, u_test, seq_inter_len, seq_extra_len, total_seq):
     

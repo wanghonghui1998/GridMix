@@ -20,6 +20,8 @@ data:
   sequence_length_optim: 2
   sequence_length_in: 40
   sequence_length_out: 0
+  seq_inter_len: 20
+  seq_extra_len: 20
 
 optim:
   batch_size: 20
@@ -35,7 +37,7 @@ fno:
   width : 32
 
 wandb:
-  entity: "spatiotemp-isir"
+  entity: "wanghonghui1998"
   project: "functa2functa"
   name: 
   id: 

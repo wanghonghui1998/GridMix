@@ -30,6 +30,13 @@ optim:
   inner_steps : 3
   test_inner_steps : 3
   epochs : 10000
+  update_modulations: False
+  update_alpha: True 
+  lr_adapt: 0.01
+  use_cl: False
+  use_cls: False
+  temperature: 1.0
+  w_cl: 1.0 
 
 inr:
   model_type : "fourier_features"
@@ -46,7 +53,7 @@ inr:
   scale : 5
 
 wandb:
-  entity: "spatiotemp-isir"
+  entity: "wanghonghui1998"
   project: "functa2functa"
   name: 
   id: 

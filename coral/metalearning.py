@@ -115,6 +115,82 @@ def inner_loop_step(
     # Perform single gradient descent step
     return modulations - inner_lr * grad
 
+def outer_step_dino(
+    func_rep,
+    coordinates,
+    features,
+    is_train=False,
+    return_reconstructions=False,
+    gradient_checkpointing=False,
+    loss_type="mse",
+    modulations=0,
+    use_rel_loss=False,
+):
+    """
+
+    Args:
+        coordinates (torch.Tensor): Shape (batch_size, *, coordinate_dim). Note this
+            _must_ have a batch dimension.
+        features (torch.Tensor): Shape (batch_size, *, feature_dim). Note this _must_
+            have a batch dimension.
+    """
+
+    if loss_type == "mse":
+        loss_fn = losses.batch_mse_fn
+    elif loss_type == "bce":
+        loss_fn = losses.batch_nll_fn
+    elif "multiscale" in loss_type:
+        loss_name = loss_type.split("-")[1]
+        loss_fn = partial(losses.batch_multi_scale_fn, loss_name=loss_name)
+
+    # func_rep.zero_grad()
+    batch_size = len(coordinates)
+    if isinstance(func_rep, DDP):
+        func_rep = func_rep.module
+
+    # modulations = modulations.requires_grad_()
+
+    # feat = features.clone()
+    # coords = coordinates.clone()
+
+    # # Run inner loop
+    # modulations = inner_loop(
+    #     func_rep,
+    #     modulations,
+    #     coords,
+    #     feat,
+    #     inner_steps,
+    #     inner_lr,
+    #     is_train,
+    #     gradient_checkpointing,
+    #     loss_type,
+    # )
+
+    with torch.set_grad_enabled(is_train):
+        features_recon = func_rep.modulated_forward(coordinates, modulations)
+        per_example_loss = loss_fn(features_recon, features)  # features
+        loss = per_example_loss.mean()
+
+    outputs = {
+        "loss": loss,
+        "psnr": losses.mse2psnr(per_example_loss).mean().item(),
+        # "modulations": modulations,
+    }
+
+    if return_reconstructions:
+        outputs["reconstructions"] = (
+            features_recon[-1] if "multiscale" in loss_type else features_recon
+        )
+
+    if use_rel_loss:
+        rel_loss = (
+            losses.batch_mse_rel_fn(features_recon[-1], features).mean()
+            if "multiscale" in loss_type
+            else losses.batch_mse_rel_fn(features_recon, features).mean()
+        )
+        outputs["rel_loss"] = rel_loss
+
+    return outputs
 
 def outer_step(
     func_rep,

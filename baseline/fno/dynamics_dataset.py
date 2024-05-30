@@ -12,12 +12,21 @@ import torch.nn.functional as F
 from scipy import io
 from torch.utils.data import Dataset
 
-from coral.utils.load_data import repeat_coordinates
+# from coral.utils.load_data import repeat_coordinates
 
 KEY_TO_INDEX = {"shallow-water-dino": 
                 {"height": 0, "vorticity": 1},
                 "navier-stokes-dino":
-                {"vorticity": 0}
+                {"vorticity": 0},
+                "navier-stokes-nms": {"vorticity": 0},
+                "navier-stokes-nms-40-60": {"vorticity": 0},
+                "navier-stokes-nms-40-70": {"vorticity": 0},
+                "navier-stokes-nms-64": {"vorticity": 0},
+                "navier-stokes-nms-40-64": {"vorticity": 0},
+                "navier-stokes-dino-40-64": {"vorticity": 0},
+                "navier-stokes-nms-40-64-wonorm": {"vorticity": 0},
+                "navier-stokes-nms-f40-64-wonorm": {"vorticity": 0},
+                "navier-stokes-nms-f40-64": {"vorticity": 0},
                 }
 
 def rearrange(set):

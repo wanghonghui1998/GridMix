@@ -5,7 +5,7 @@ import einops
 import torch
 from torch.utils.data import DataLoader
 from torch_geometric.loader import DataLoader as GeometricLoader
-from coral.metalearning import outer_step, graph_outer_step
+from coral.metalearning import outer_step, graph_outer_step, outer_step_dino
 
 
 def load_operator_modulations(
@@ -237,10 +237,12 @@ def load_dynamics_modulations(
     run_dir = Path(run_dir)
     if try_reload:
         try:
+            print('load modulations successfully')
             return torch.load(run_dir / f"{run_name}.pt")
         except:
             try_reload = False
     else:
+        print('modulations generation begin')
         train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
         train_extra_loader = DataLoader(trainset_extra, batch_size=batch_size, shuffle=True)
         test_loader = DataLoader(valset, batch_size=batch_size, shuffle=True)
@@ -276,6 +278,257 @@ def load_dynamics_modulations(
             "fit_train_mse": fit_train_mse / ntrain,
             "fit_train_extra_mse": fit_train_extra_mse / ntrain,
             "fit_test_mse": fit_test_mse / ntest,
+        }
+
+        os.makedirs(str(run_dir), exist_ok=True)
+        torch.save(modulations, str(run_dir / f"{run_name}.pt"))
+
+        return modulations
+
+def set_requires_grad(module, tf=False):
+    module.requires_grad = tf
+    for param in module.parameters():
+        param.requires_grad = tf
+
+def eval_modulation_loop_dino(loader, inr, n_steps, lr_adapt, z, T):
+    fit_mse = 0
+    set_requires_grad(inr, False)
+    save_best = True 
+    latent_dim = z.shape[1]
+    # print(len(loader))
+    for substep, (batch_v, batch_z, batch_coord, idx) in enumerate(loader):
+        batch_v = batch_v.cuda()
+        batch_z = batch_z.cuda()
+        batch_coord = batch_coord.cuda()
+        n_samples = batch_v.shape[0]
+
+        if batch_coord.shape[-2] == 2:
+            batch_v = einops.rearrange(batch_v, 'b ... t -> (b t) ...')#.unsqueeze(-1)
+        else:
+            batch_v = einops.rearrange(batch_v, 'b ... t -> (b t) ...').unsqueeze(-1)
+
+        batch_z = einops.rearrange(batch_z, 'b ... t -> (b t) ...')
+        batch_coord = einops.rearrange(batch_coord, 'b ... t -> (b t) ...')
+
+        loss_min_test = 1e30
+        states_params_out = torch.nn.ParameterList([torch.nn.Parameter(torch.zeros_like(batch_z))])
+        # states_params_out = nn.ParameterList([nn.Parameter(torch.zeros(n_samples*T, latent_dim).to(device))])
+        optim_states_out = torch.optim.Adam(states_params_out, lr=lr_adapt)
+
+        for n_steps_idx in range(n_steps):
+            states_params_index = torch.cat([states_params_out[0]], dim=0)   # to create a copy of states
+            outputs = outer_step_dino(
+                inr,
+                batch_coord,
+                batch_v,
+                is_train=True,
+                return_reconstructions=True,
+                gradient_checkpointing=False,
+                loss_type="mse",
+                modulations=states_params_index,
+            )
+
+            loss_l2 = outputs["loss"] * n_samples * T
+            # fit_test_mse += loss.item() * n_samples
+            
+            if loss_l2 < loss_min_test and save_best:
+                loss_min_test = loss_l2.item()
+                best_states_params_index = states_params_index
+                # fit_test_mse = loss_l2.item() * n_samples
+                # if use_rel_loss:
+                #     rel_test_mse = outputs["rel_loss"].item() * n_samples
+            # loss_opt_new = loss_l2
+            # print(loss_l2.item(), fit_test_mse)
+            # loss_opt = loss_opt_new
+            optim_states_out.zero_grad(True)
+            loss_l2.backward()
+            optim_states_out.step()
+            # print(f'{n_steps_idx} {loss_l2.item()} {loss_min_test}')
+            
+        if save_best:
+            states_params_index = best_states_params_index
+            fit_mse += loss_min_test / T 
+        else:
+            fit_mse += loss_l2.item() / T 
+
+       
+        tmp_mod = states_params_index.cpu().detach()
+        tmp_mod = einops.rearrange(tmp_mod, "(b t) ... -> b ... t", t=T)
+        z[idx] = tmp_mod
+        # loss = outputs["loss"]
+        # fit_mse += loss.item() * n_samples
+        set_requires_grad(inr, True)
+    return z, fit_mse
+
+def load_dynamics_modulations_dino(
+    trainset,
+    trainset_extra,
+    valset,
+    inr,
+    run_dir,
+    run_name,
+    n_steps=1000,
+    lr_adapt=0.01,
+    batch_size=2,
+    data_to_encode=None,
+    try_reload=False,
+):
+    """WARNING : This function assumes that we can encode a full trajectory"""
+    run_dir = Path(run_dir)
+    if try_reload:
+        try:
+            print('load modulations successfully')
+            return torch.load(run_dir / f"{run_name}.pt")
+        except:
+            try_reload = False
+    else:
+        print('modulations generation begin')
+        train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
+        train_extra_loader = DataLoader(trainset_extra, batch_size=batch_size, shuffle=True)
+        test_loader = DataLoader(valset, batch_size=batch_size, shuffle=True)
+
+        ntrain = len(trainset)
+        ntest = len(valset)
+        latent_dim = trainset.latent_dim
+        T_train = trainset.T
+        T_test = valset.T
+
+        # add reconstruction loss as in FNO paper
+        z_tr = torch.zeros(ntrain, latent_dim, T_train)
+        z_tr_extra = torch.zeros(ntrain, latent_dim, T_test)
+        z_te = torch.zeros(ntest, latent_dim, T_test)
+
+        inr.eval()
+
+        z_tr, fit_train_mse = eval_modulation_loop_dino(train_loader, inr, n_steps, lr_adapt, z_tr, T_train)
+        print(f"Train, average loss: {fit_train_mse / ntrain}")
+
+        z_tr_extra, fit_train_extra_mse = eval_modulation_loop_dino(train_extra_loader, inr, n_steps, lr_adapt, z_tr_extra, T_test)
+
+        print(f"Train extra, average loss: {fit_train_extra_mse / ntrain}")
+
+        z_te, fit_test_mse = eval_modulation_loop_dino(test_loader, inr, n_steps, lr_adapt, z_te, T_test)
+
+        print(f"Test, average loss: {fit_test_mse / ntest}")
+
+        modulations = {
+            "z_train": z_tr,
+            "z_train_extra": z_tr_extra,
+            "z_test": z_te,
+            "fit_train_mse": fit_train_mse / ntrain,
+            "fit_train_extra_mse": fit_train_extra_mse / ntrain,
+            "fit_test_mse": fit_test_mse / ntest,
+        }
+
+        os.makedirs(str(run_dir), exist_ok=True)
+        torch.save(modulations, str(run_dir / f"{run_name}.pt"))
+
+        return modulations
+
+
+
+def eval_modulation_loop_edg(loader, inr, code, inner_steps, alpha, z, T):
+    fit_mse = 0
+    code_for_each_t = code.cuda()
+    if T > code_for_each_t.shape[0]:
+        print('meta code: padding zeros beyong training horizons')
+        code_for_each_sample = torch.cat([code_for_each_t, torch.zeros((T-code_for_each_t.shape[0], code_for_each_t.shape[1])).cuda()], dim=0)
+    else:
+        code_for_each_sample = code_for_each_t 
+    print(f'code_for_each_sample: {code_for_each_sample.shape}')
+    for substep, (batch_v, batch_z, batch_coord, idx) in enumerate(loader):
+        batch_v = batch_v.cuda()
+        batch_z = batch_z.cuda()
+        batch_coord = batch_coord.cuda()
+        n_samples = batch_v.shape[0]
+
+        if batch_coord.shape[-2] == 2:
+            batch_v = einops.rearrange(batch_v, 'b ... t -> (b t) ...')#.unsqueeze(-1)
+        else:
+            batch_v = einops.rearrange(batch_v, 'b ... t -> (b t) ...').unsqueeze(-1)
+
+        batch_z = einops.rearrange(batch_z, 'b ... t -> (b t) ...')
+        batch_coord = einops.rearrange(batch_coord, 'b ... t -> (b t) ...')
+
+        input_modulations = torch.cat([code_for_each_sample for _ in range(n_samples)], dim=0).detach()
+        outputs = outer_step(
+            inr,
+            batch_coord,
+            batch_v,
+            inner_steps,
+            alpha,
+            is_train=False,
+            return_reconstructions=True,
+            gradient_checkpointing=False,
+            use_rel_loss=False,
+            loss_type="mse",
+            modulations=input_modulations,
+        )
+        tmp_mod = outputs["modulations"].cpu().detach()
+        tmp_mod = einops.rearrange(tmp_mod, "(b t) ... -> b ... t", t=T)
+        z[idx] = tmp_mod
+        loss = outputs["loss"]
+        fit_mse += loss.item() * n_samples
+    return z, fit_mse
+
+def load_dynamics_modulations_edg(
+    trainset,
+    trainset_extra,
+    valset,
+    inr,
+    code, 
+    run_dir,
+    run_name,
+    inner_steps=3,
+    alpha=0.01,
+    batch_size=2,
+    data_to_encode=None,
+    try_reload=False,
+):
+    """WARNING : This function assumes that we can encode a full trajectory"""
+    run_dir = Path(run_dir)
+    if try_reload:
+        try:
+            return torch.load(run_dir / f"{run_name}.pt")
+        except:
+            try_reload = False
+    else:
+        train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
+        train_extra_loader = DataLoader(trainset_extra, batch_size=batch_size, shuffle=True)
+        test_loader = DataLoader(valset, batch_size=batch_size, shuffle=True)
+
+        ntrain = len(trainset)
+        ntest = len(valset)
+        latent_dim = trainset.latent_dim
+        T_train = trainset.T
+        T_test = valset.T
+
+        # add reconstruction loss as in FNO paper
+        z_tr = torch.zeros(ntrain, latent_dim, T_train)
+        z_tr_extra = torch.zeros(ntrain, latent_dim, T_test)
+        z_te = torch.zeros(ntest, latent_dim, T_test)
+
+        inr.eval()
+
+        z_tr, fit_train_mse = eval_modulation_loop_edg(train_loader, inr, code, inner_steps, alpha, z_tr, T_train)
+        print(f"Train, average loss: {fit_train_mse / ntrain}")
+
+        z_tr_extra, fit_train_extra_mse = eval_modulation_loop_edg(train_extra_loader, inr, code, inner_steps, alpha, z_tr_extra, T_test)
+
+        print(f"Train extra, average loss: {fit_train_extra_mse / ntrain}")
+
+        z_te, fit_test_mse = eval_modulation_loop_edg(test_loader, inr, code, inner_steps, alpha, z_te, T_test)
+
+        print(f"Test, average loss: {fit_test_mse / ntest}")
+
+        modulations = {
+            "z_train": z_tr,
+            "z_train_extra": z_tr_extra,
+            "z_test": z_te,
+            "fit_train_mse": fit_train_mse / ntrain,
+            "fit_train_extra_mse": fit_train_extra_mse / ntrain,
+            "fit_test_mse": fit_test_mse / ntest,
+            "t_code": code, 
         }
 
         os.makedirs(str(run_dir), exist_ok=True)
@@ -479,6 +732,108 @@ def load_graph_modulations(
             "z_train": z_tr,
             "z_test": z_te,
             "fit_train_mse": fit_train_mse / ntrain,
+            "fit_test_mse": fit_test_mse / ntest,
+        }
+
+        os.makedirs(str(run_dir), exist_ok=True)
+        torch.save(modulations, str(run_dir / f"{run_name}.pt"))
+
+        return modulations
+
+
+
+def eval_modulation_loop_enc(loader, inr, code, z, T):
+    fit_mse = 0
+    for substep, (batch_v, batch_z, batch_coord, idx) in enumerate(loader):
+        batch_v = batch_v.cuda()
+        batch_z = batch_z.cuda()
+        batch_coord = batch_coord.cuda()
+        n_samples = batch_v.shape[0]
+
+        if batch_coord.shape[-2] == 2:
+            batch_v = einops.rearrange(batch_v, 'b ... t -> (b t) ...')#.unsqueeze(-1)
+        else:
+            batch_v = einops.rearrange(batch_v, 'b ... t -> (b t) ...').unsqueeze(-1)
+
+        batch_z = einops.rearrange(batch_z, 'b ... t -> (b t) ...')
+        batch_coord = einops.rearrange(batch_coord, 'b ... t -> (b t) ...')
+
+        input_modulations = code(batch_v)
+        # import pdb; pdb.set_trace()
+        outputs = outer_step_dino(
+            inr,
+            batch_coord,
+            batch_v,
+            is_train=False,
+            return_reconstructions=True,
+            gradient_checkpointing=False,
+            loss_type="mse",
+            modulations=input_modulations,
+        )
+
+        tmp_mod = input_modulations.cpu().detach()
+        tmp_mod = einops.rearrange(tmp_mod, "(b t) ... -> b ... t", t=T)
+        z[idx] = tmp_mod
+        loss = outputs["loss"]
+        fit_mse += loss.item() * n_samples
+    return z, fit_mse
+
+def load_dynamics_modulations_enc(
+    trainset,
+    trainset_extra,
+    valset,
+    inr,
+    code,
+    run_dir,
+    run_name,
+    batch_size=2,
+    data_to_encode=None,
+    try_reload=False,
+):
+    """WARNING : This function assumes that we can encode a full trajectory"""
+    run_dir = Path(run_dir)
+    if try_reload:
+        try:
+            print('load modulations successfully')
+            return torch.load(run_dir / f"{run_name}.pt")
+        except:
+            try_reload = False
+    else:
+        print('modulations generation begin')
+        train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
+        train_extra_loader = DataLoader(trainset_extra, batch_size=batch_size, shuffle=True)
+        test_loader = DataLoader(valset, batch_size=batch_size, shuffle=True)
+
+        ntrain = len(trainset)
+        ntest = len(valset)
+        latent_dim = trainset.latent_dim
+        T_train = trainset.T
+        T_test = valset.T
+
+        # add reconstruction loss as in FNO paper
+        z_tr = torch.zeros(ntrain, latent_dim, T_train)
+        z_tr_extra = torch.zeros(ntrain, latent_dim, T_test)
+        z_te = torch.zeros(ntest, latent_dim, T_test)
+
+        inr.eval()
+
+        z_tr, fit_train_mse = eval_modulation_loop_enc(train_loader, inr, code, z_tr, T_train)
+        print(f"Train, average loss: {fit_train_mse / ntrain}")
+
+        z_tr_extra, fit_train_extra_mse = eval_modulation_loop_enc(train_extra_loader, inr, code, z_tr_extra, T_test)
+
+        print(f"Train extra, average loss: {fit_train_extra_mse / ntrain}")
+
+        z_te, fit_test_mse = eval_modulation_loop_enc(test_loader, inr, code, z_te, T_test)
+
+        print(f"Test, average loss: {fit_test_mse / ntest}")
+
+        modulations = {
+            "z_train": z_tr,
+            "z_train_extra": z_tr_extra,
+            "z_test": z_te,
+            "fit_train_mse": fit_train_mse / ntrain,
+            "fit_train_extra_mse": fit_train_extra_mse / ntrain,
             "fit_test_mse": fit_test_mse / ntest,
         }
 

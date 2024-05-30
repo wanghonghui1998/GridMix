@@ -66,6 +66,7 @@ def main(cfg: DictConfig) -> None:
     same_grid = cfg.data.same_grid
     seq_inter_len = cfg.data.seq_inter_len
     seq_extra_len = cfg.data.seq_extra_len
+    n_cond = cfg.data.n_cond
 
     # optim
     batch_size = cfg.optim.batch_size
@@ -234,6 +235,7 @@ def main(cfg: DictConfig) -> None:
             input_dim=input_dim,
             output_dim=output_dim,
         )
+        print(inr)
         modulations = load_dynamics_modulations(
             trainset,
             trainset_extra,
@@ -334,15 +336,15 @@ def main(cfg: DictConfig) -> None:
     )
     train_extra_loader = torch.utils.data.DataLoader(
         trainset_extra,
-        batch_size=batch_size,
-        shuffle=True,
+        batch_size=batch_size//2,
+        shuffle=False,
         num_workers=1,
         pin_memory=True,
     )
     test_loader = torch.utils.data.DataLoader(
         testset,
-        batch_size=batch_size_val,
-        shuffle=True,
+        batch_size=batch_size_val//2,
+        shuffle=False,
         num_workers=1,
     )
 
@@ -352,6 +354,22 @@ def main(cfg: DictConfig) -> None:
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=lr, weight_decay=weight_decay)
     
+    saved_checkpoint = cfg.wandb.saved_checkpoint
+    if saved_checkpoint:
+        print(f'load {cfg.wandb.checkpoint_path}')
+        checkpoint = torch.load(cfg.wandb.checkpoint_path)
+        model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        epoch_start = checkpoint['epoch']
+        # alpha = checkpoint['alpha']
+        # best_loss = checkpoint['loss']
+        # cfg = checkpoint['cfg']
+        # print("cfg : ", cfg)
+    elif saved_checkpoint == False:
+        epoch_start = 0
+        # best_loss = np.inf
+    print("epoch_start", epoch_start)
+
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode="min",
@@ -385,6 +403,25 @@ def main(cfg: DictConfig) -> None:
         detailed_train_eval_mse = None
         detailed_test_mse = None
         
+    # eval 
+    evaluate = cfg.wandb.evaluate
+    if evaluate:
+        pred_train_inter_mse, code_train_inter_mse, pred_train_extra_mse, code_train_extra_mse, total_pred_train_mse, detailed_train_eval_mse = batch_eval_loop(
+                    model, inr, train_extra_loader,
+                    timestamps_test, detailed_train_eval_mse,
+                    ntrain, multichannel, z_mean, z_std,
+                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'train_{epoch_start}')
+                )
+
+        pred_test_inter_mse, code_test_inter_mse, pred_test_extra_mse, code_test_extra_mse, pred_test_mse, detailed_test_mse = batch_eval_loop(
+                    model, inr, test_loader,
+                    timestamps_test, detailed_test_mse,
+                    ntest, multichannel, z_mean, z_std,
+                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'test_{epoch_start}')
+                )
+        print(f'train inter mse {pred_train_inter_mse}, train_extra_mse {pred_train_extra_mse}, test inter mse {pred_test_inter_mse}, test extra mse {pred_test_extra_mse}')
+        return 
+
     for step in range(epochs):
         step_show = step % 100 == 0
         step_show_last = step == epochs - 1
@@ -405,7 +442,11 @@ def main(cfg: DictConfig) -> None:
             if multichannel:
                 modulations = einops.rearrange(modulations, "b l c t -> b (l c) t")
 
-            z_pred = ode_scheduling(odeint, model, modulations, timestamps_train, epsilon_t)
+            modulations = modulations[...,n_cond:]
+            images = images[...,n_cond:]
+            coords = coords[...,n_cond:]
+
+            z_pred = ode_scheduling(odeint, model, modulations, timestamps_train[n_cond:], epsilon_t)
             loss = ((z_pred - modulations) ** 2).mean()
             optimizer.zero_grad()
             loss.backward()
@@ -430,11 +471,11 @@ def main(cfg: DictConfig) -> None:
         scheduler.step(code_train_mse)
 
         if T_train != T_test:
-            pred_train_inter_mse, code_train_inter_mse, pred_train_extra_mse, code_train_extra_mse, pred_train_mse, detailed_train_eval_mse = batch_eval_loop(
+            pred_train_inter_mse, code_train_inter_mse, pred_train_extra_mse, code_train_extra_mse, total_pred_train_mse, detailed_train_eval_mse = batch_eval_loop(
                 model, inr, train_extra_loader,
                 timestamps_test, detailed_train_eval_mse,
                 ntrain, multichannel, z_mean, z_std,
-                dataset_name, T_train
+                dataset_name, T_train, n_cond
             )
 
         if True in (step_show, step_show_last):
@@ -443,16 +484,16 @@ def main(cfg: DictConfig) -> None:
                     model, inr, test_loader,
                     timestamps_test, detailed_test_mse,
                     ntest, multichannel, z_mean, z_std,
-                    dataset_name, T_train
+                    dataset_name, T_train,n_cond
                 )
 
                 log_dic = {
-                    "pred_train_inter_mse": pred_train_mse,
+                    "pred_train_inter_mse": pred_train_inter_mse,
                     "pred_train_extra_mse": pred_train_extra_mse,
                     "pred_test_mse_inter": pred_test_inter_mse,
                     "pred_test_mse_extra": pred_test_extra_mse,
-                    "pred_test_mse": pred_test_mse,
-                    "code_train_inter_mse": code_train_mse,
+                    # "pred_test_mse": pred_test_mse,
+                    "code_train_inter_mse": code_train_inter_mse,
                     "code_train_extra_mse": code_train_extra_mse,
                     "code_test_inter_mse": code_test_inter_mse,
                     "code_test_extra_mse": code_test_extra_mse,
@@ -500,10 +541,10 @@ def main(cfg: DictConfig) -> None:
         else:
             wandb.log(
                 {
-                    "pred_train_inter_mse": pred_train_inter_mse,
-                    "pred_train_extra_mse": pred_train_extra_mse,
-                    "code_train_inter_mse": code_train_inter_mse,
-                    "code_train_extra_mse": code_train_extra_mse,
+                    # "pred_train_inter_mse": pred_train_inter_mse,
+                    # "pred_train_extra_mse": pred_train_extra_mse,
+                    # "code_train_inter_mse": code_train_inter_mse,
+                    # "code_train_extra_mse": code_train_extra_mse,
                     "pred_train_mse": pred_train_mse,
                     "code_train_mse": code_train_mse,
                 },
@@ -511,8 +552,8 @@ def main(cfg: DictConfig) -> None:
                 commit=not step_show,
             )
 
-        if pred_train_mse < best_loss:
-            best_loss = pred_train_mse
+        if total_pred_train_mse < best_loss:
+            best_loss = total_pred_train_mse
             if T_train != T_test:
                 torch.save(
                     {
@@ -542,8 +583,36 @@ def main(cfg: DictConfig) -> None:
                     },
                     f"{model_dir}/{run_name}.pt",
                 )
-
-    return pred_train_mse
+        if T_train != T_test:
+            torch.save(
+                {
+                    "cfg": cfg,
+                    "epoch": step,
+                    "model": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "loss_inter": code_test_inter_mse,
+                    "loss_extra": code_test_extra_mse,
+                    "alpha": alpha,
+                    "grid_tr": grid_tr,
+                    "grid_te": grid_te,
+                },
+                f"{model_dir}/{run_name}_ck.pt",
+            )
+        if T_train == T_test:
+            torch.save(
+                {
+                    "cfg": cfg,
+                    "epoch": step,
+                    "model": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "loss": code_test_mse,
+                    "alpha": alpha,
+                    "grid_tr": grid_tr,
+                    "grid_te": grid_te,
+                },
+                f"{model_dir}/{run_name}_ck.pt",
+            )
+    return total_pred_train_mse
     
 if __name__ == "__main__":
     main()

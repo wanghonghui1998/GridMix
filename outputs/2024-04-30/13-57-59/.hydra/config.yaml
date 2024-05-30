@@ -1,0 +1,40 @@
+data:
+  dir: /cluster/nvme4a/whh/dataset/ns_nms/u_Re80_T10_None.npy
+  dataset_name: navier-stokes-nms-40-64
+  same_grid: true
+  data_to_encode: null
+  sub_from: 1
+  sub_tr: 4
+  sub_te: 4
+  ntrain: null
+  ntest: null
+  seed: 123
+  setting: extrapolation
+  sequence_length_optim: ''
+  sequence_length_in: ''
+  sequence_length_out: ''
+  seq_inter_len: 20
+  seq_extra_len: 20
+optim:
+  batch_size: 16
+  batch_size_val: null
+  learning_rate: 0.001
+  epochs: 2000
+  scheduler_step: 100
+  scheduler_gamma: 0.5
+fno:
+  model_type: fno
+  modes: 12
+  width: 32
+wandb:
+  entity: wanghonghui1998
+  project: functa2functa
+  name: fno_nms_wof_r2_2k_wnorm_last40_t64
+  id: null
+  dir: null
+  sweep_id: null
+  result_dir: null
+jz:
+  program: training/inr.py
+  mode: dev
+  partition: gpu_p2

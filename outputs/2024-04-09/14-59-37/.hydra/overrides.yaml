@@ -1,0 +1,16 @@
+- data.dir=/cluster/nvme4a/whh/exp/dino_nseq2_horizon20_512_2_20
+- data.sub_from=1
+- data.same_grid=True
+- data.dataset_name=navier-stokes-dino
+- inr.model_type=siren
+- data.seq_inter_len=20
+- data.seq_extra_len=20
+- data.sub_tr=1
+- data.sub_te=1
+- optim.lr_inr=0.000005
+- inr.depth=4
+- inr.latent_dim=128
+- inr.hidden_dim=128
+- optim.batch_size=128
+- optim.epochs=10000
+- wandb.saved_checkpoint=False

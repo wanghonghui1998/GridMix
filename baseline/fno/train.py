@@ -6,6 +6,8 @@ from coral.utils.data.load_data import get_dynamics_data, set_seed
 from dynamics_dataset import TemporalDatasetWithCode
 from utilities3 import *
 import torch.nn.functional as F
+import torch.nn as nn 
+import torch 
 from timeit import default_timer
 import sys
 from pathlib import Path
@@ -258,9 +260,12 @@ def main(cfg: DictConfig) -> None:
     )
 
     mean, sigma = u_train.mean(), u_train.std()
+    print(f'real mean {mean}, std {sigma}')
     u_train = (u_train - mean) / sigma
     u_test = (u_test - mean) / sigma
-    
+    mean = 0.0 * mean 
+    sigma = 0.0* sigma + 1.0
+    # import pdb; pdb.set_trace()
     ntrain = u_train.shape[0]
     ntest = u_test.shape[0]
     num_channels = trainset[0][0].shape[-2]
@@ -299,6 +304,19 @@ def main(cfg: DictConfig) -> None:
         model.parameters(), lr=learning_rate, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.StepLR(
         optimizer, step_size=scheduler_step, gamma=scheduler_gamma)
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+    #     optimizer,
+    #     mode="min",
+    #     factor=scheduler_gamma,
+    #     patience=250,
+    #     threshold=0.01,
+    #     threshold_mode="rel",
+    #     cooldown=0,
+    #     min_lr=1e-5,
+    #     eps=1e-08,
+    #     verbose=True,
+    # )
+
 
     #myloss = LpLoss(size_average=False)
     myloss = nn.MSELoss()
@@ -334,8 +352,9 @@ def main(cfg: DictConfig) -> None:
             loss.backward()
             optimizer.step()
         scheduler.step()
+        
         pred_train_mse /= (ntrain*(seq_inter_len-1))
-
+        # scheduler.step(pred_train_mse)
         model.eval()
 
         pred_train_inter_mse = 0.0
@@ -406,10 +425,11 @@ def main(cfg: DictConfig) -> None:
                 {
                     "pred_train_inter_mse": pred_train_inter_mse,
                     "pred_train_extra_mse": pred_train_extra_mse,
-                    'pred_test_inter_mse': pred_test_inter_mse,
-                    'pred_test_extra_mse': pred_test_extra_mse,
+                    'pred_test_mse_inter': pred_test_inter_mse,
+                    'pred_test_mse_extra': pred_test_extra_mse,
                 }
                 )
+            print(f'{ep}: pred_train_inter_mse {pred_train_inter_mse}, pred_train_extra_mse {pred_train_extra_mse}, pred_test_inter_mse {pred_test_inter_mse}, pred_test_extra_mse {pred_test_extra_mse}')
         else:
             wandb.log(
                 {

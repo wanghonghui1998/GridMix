@@ -45,7 +45,7 @@ inr:
   loss_type: "mse"
 
 wandb:
-  entity: "spatiotemp-isir"
+  entity: "wanghonghui1998"
   project: "functa2functa"
   name: 
   id: 

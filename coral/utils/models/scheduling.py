@@ -6,6 +6,129 @@ from typing import Tuple
 from torch_geometric.data import Data
 from torch_geometric.nn import radius_graph, knn_graph
 
+def mamba_scheduling(model, true_codes, t, ar_mode=True):
+    if not ar_mode:
+        true_codes = true_codes.permute(0,2,1)  # b,t,c
+        pred_codes = model(true_codes)
+        codes = torch.cat([true_codes[:,0:1].detach(), pred_codes[:,:-1]], dim=1)
+    else:
+        # codes = []
+        true_codes = true_codes.permute(0,2,1)  # b,t,c
+        codes = true_codes[:,0:1]
+        # import pdb; pdb.set_trace()
+        for i in range(len(t)-1):
+            output = model(codes)
+            codes = torch.cat([codes, output[:,-1:]], dim=1)
+    return codes.permute(0,2,1)
+
+def mamba_scheduling_startT(model, true_codes, t, ar_mode=True, ar_startT=1):
+    if ar_startT == len(t):
+        ar_mode = False 
+    if not ar_mode:
+        true_codes = true_codes.permute(0,2,1)  # b,t,c
+        pred_codes = model(true_codes)
+        codes = torch.cat([true_codes[:,0:1].detach(), pred_codes[:,:-1]], dim=1)
+    else:
+        # codes = []
+        true_codes = true_codes.permute(0,2,1)  # b,t,c
+        codes = true_codes[:,0:ar_startT]
+        # import pdb; pdb.set_trace()
+        for i in range(ar_startT,len(t)):
+            output = model(codes)
+            codes = torch.cat([codes, output[:,-1:]], dim=1)
+        codes = torch.cat([true_codes[:,0:1], output], dim=1)   # for eval     
+    return codes.permute(0,2,1)
+
+def mamba_marching(model, true_codes, t, ar_mode=True):
+    if not ar_mode:
+        true_codes = true_codes.permute(0,2,1)  # b,t,c
+        pred_codes = model(true_codes)
+        codes = torch.cat([true_codes[:,0:1].detach(), pred_codes[:,:-1]], dim=1)
+    else:
+        # codes = []
+        true_codes = true_codes.permute(0,2,1)  # b,t,c
+        codes = true_codes[:,0:1]
+        # import pdb; pdb.set_trace()
+        for i in range(len(t)-1):
+            output = model(codes)
+            codes = torch.cat([codes, output[:,-1:]], dim=1)
+    return codes.permute(0,2,1)
+
+def memory_ode_scheduling(_int, _f, true_codes, t, epsilon, method="rk4"):
+    _f.clear_history()
+    if epsilon < 1e-3:
+        epsilon = 0
+    if epsilon == 0:
+        codes = _int(_f, y0=true_codes[..., 0], t=t, method=method)
+        _f.clear_history()
+    else:
+        eval_points = np.random.random(len(t)) < epsilon
+        eval_points[-1] = False
+        eval_points = eval_points[1:]
+
+        start_i, end_i = 0, None
+        codes = []
+        for i, eval_point in enumerate(eval_points):
+            if eval_point == True:
+                end_i = i + 1
+                t_seg = t[start_i: end_i + 1]
+                res_seg = _int(
+                    _f, y0=true_codes[..., start_i], t=t_seg, method=method)
+                _f.clear_history()
+                if len(codes) == 0:
+                    codes.append(res_seg)
+                else:
+                    codes.append(res_seg[1:])
+                start_i = end_i
+        t_seg = t[start_i:]
+        res_seg = _int(_f, y0=true_codes[..., start_i], t=t_seg, method=method)
+        _f.clear_history()
+        if len(codes) == 0:
+            codes.append(res_seg)
+        else:
+            codes.append(res_seg[1:])
+        codes = torch.cat(codes, dim=0)
+        # import pdb; pdb.set_trace()
+    # (t b l) -> (b l t)
+    return torch.movedim(codes, 0, -1)
+
+def hippo_scheduling(_int, _f, true_codes, t, c0, epsilon, method="rk4"):
+    if epsilon < 1e-3:
+        epsilon = 0
+    if epsilon == 0:
+        codes,c = _int(_f, y0=(true_codes[..., 0],c0), t=t, method=method)
+    else:
+        eval_points = np.random.random(len(t)) < epsilon
+        eval_points[-1] = False
+        eval_points = eval_points[1:]
+
+        start_i, end_i = 0, None
+        codes = []
+        c=c0
+        for i, eval_point in enumerate(eval_points):
+            if eval_point == True:
+                end_i = i + 1
+                t_seg = t[start_i: end_i + 1]
+                res_seg, c_seg = _int(
+                    _f, y0=(true_codes[..., start_i],c), t=t_seg, method=method)
+
+                if len(codes) == 0:
+                    codes.append(res_seg)
+                else:
+                    codes.append(res_seg[1:])
+                start_i = end_i
+                c = c_seg[-1].detach()
+
+        t_seg = t[start_i:]
+        res_seg,c_seg = _int(_f, y0=(true_codes[..., start_i],c), t=t_seg, method=method)
+        if len(codes) == 0:
+            codes.append(res_seg)
+        else:
+            codes.append(res_seg[1:])
+        codes = torch.cat(codes, dim=0)
+    # (t b l) -> (b l t)
+    return torch.movedim(codes, 0, -1)
+
 def ode_scheduling(_int, _f, true_codes, t, epsilon, method="rk4"):
     if epsilon < 1e-3:
         epsilon = 0
@@ -38,6 +161,7 @@ def ode_scheduling(_int, _f, true_codes, t, epsilon, method="rk4"):
             codes.append(res_seg[1:])
         codes = torch.cat(codes, dim=0)
     # (t b l) -> (b l t)
+    # print(codes.shape)
     return torch.movedim(codes, 0, -1)
 
 

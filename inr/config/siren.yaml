@@ -25,11 +25,20 @@ optim:
   lr_inr : 0.000005
   gamma_step : 0.9
   lr_code : 0.01
+  lr_edg : 0.01
   meta_lr_code : 0.000005
   weight_decay_code: 0
   inner_steps : 3
   test_inner_steps : 3
+  n_steps : 1000
   epochs : 10000
+  update_modulations: False
+  update_alpha: True 
+  lr_adapt: 0.01
+  use_cl: False
+  use_cls: False
+  temperature: 1.0
+  w_cl: 1.0 
 
 inr:
   model_type : "siren"
@@ -44,9 +53,12 @@ inr:
   hypernet_width: 128
   last_activation: 
   loss_type: "mse"
+  use_norm: True 
+  grid_size: 64
+  siren_init: True
 
 wandb:
-  entity: "spatiotemp-isir"
+  entity: "wanghonghui1998"
   project: "functa2functa"
   name: 
   id: 
@@ -59,3 +71,11 @@ jz:
   program: training/inr.py
   mode: dev
   partition: gpu_p2
+
+distributed: False
+world_size: 1
+gpu_id: 0
+rank: 0 
+ddp:
+  port : 29051
+  launcher: 

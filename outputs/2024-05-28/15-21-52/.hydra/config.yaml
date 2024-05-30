@@ -1,0 +1,49 @@
+data:
+  dir: /cluster/nvme4a/whh/dataset/ns_nms/u_Re800_T60_transient_tr256.npy
+  dataset_name: navier-stokes-nms-f40-64-wonorm
+  data_to_encode: null
+  ntrain: null
+  ntest: null
+  sub_from: 1
+  sub_tr: 4
+  sub_te: 4
+  seed: 123
+  same_grid: true
+  seq_inter_len: 20
+  seq_extra_len: 20
+  n_cond: 0
+optim:
+  batch_size: 64
+  batch_size_val: null
+  lr: 0.001
+  weight_decay: 0
+  gamma_step: 0.9
+  epochs: 10000
+  n_steps: 1000
+  lr_adapt: 0.01
+dynamics:
+  model_type: ode
+  depth: 3
+  width: 512
+  teacher_forcing_init: 0.99
+  teacher_forcing_decay: 0.99
+  teacher_forcing_update: 10
+  run_name: prime-darkness-4874
+inr:
+  inner_steps: 3
+  run_name: ff_wf_r3_first40_T64-wonorm2
+  run_dict: null
+wandb:
+  entity: wanghonghui1998
+  project: functa2functa
+  name: dynff_wf_r3_first40_T64-wonorm3
+  id: dynff_S256_wf_r3_first40_T64-wonorm3
+  dir: null
+  sweep_id: null
+  saved_checkpoint: false
+  checkpoint_path: null
+  evaluate: null
+jz:
+  program: training/inr.py
+  mode: dev
+  partition: gpu_p2

@@ -18,8 +18,18 @@ from torch_geometric.data import Data
 KEY_TO_INDEX = {
     "shallow-water-dino": {"height": 0, "vorticity": 1},
     "navier-stokes-dino": {"vorticity": 0},
+    "navier-stokes-nms": {"vorticity": 0},
     "navier-stokes-1e-5": {"vorticity": 0},
     "navier-stokes-1e-4": {"vorticity": 0},
+    "navier-stokes-nms-40-60": {"vorticity": 0},
+    "navier-stokes-nms-40-70": {"vorticity": 0},
+    "navier-stokes-nms-64": {"vorticity": 0},
+    "navier-stokes-nms-40-64": {"vorticity": 0},
+    "navier-stokes-nms-40-64-wonorm": {"vorticity": 0},
+    "navier-stokes-nms-f40-64-wonorm": {"vorticity": 0},
+    "navier-stokes-nms-f40-64": {"vorticity": 0},
+    "navier-stokes-dino-40-64": {"vorticity": 0},
+    "sst-11-22": {"vorticity": 0},
     "mp-pde-burgers": {"vorticity": 0},
 }
 
@@ -50,6 +60,7 @@ class TemporalDatasetWithCode(Dataset):
         N = v.shape[0]
         T = v.shape[-1]
         self.v = v
+        # print('dataset shape', self.v.shape)
         self.c = grid  # repeat_coordinates(grid, N).clone()
         self.output_dim = self.v.shape[-2]
         self.input_dim = self.c.shape[-2]
@@ -97,15 +108,17 @@ class TemporalDatasetWithCode(Dataset):
 
         if self.index_value is not None:
             sample_v = self.v[idx, ..., self.index_value, :]
+            
         else:
             sample_v = self.v[idx, ...]
+            # print('idx', self.v.shape, sample_v.shape)
 
         sample_z = self.z[idx, ...]
         sample_c = self.c[idx, ...]
 
         return sample_v, sample_z, sample_c, idx
 
-    def __setitem__(self, z_values, idx):
+    def __setitem__(self, idx, z_values):
         """How to save efficiently the updated codes.
 
         Args:

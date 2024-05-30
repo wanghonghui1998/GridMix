@@ -1,0 +1,43 @@
+data:
+  dir: /cluster/nvme4a/whh/exp/dino_nseq1_horizon20_512_1_20
+  dataset_name: navier-stokes-dino
+  data_to_encode: null
+  ntrain: null
+  ntest: null
+  sub_from: 1
+  sub_tr: 1
+  sub_te: 1
+  seed: 123
+  same_grid: true
+  seq_inter_len: 10
+  seq_extra_len: 10
+optim:
+  batch_size: 64
+  batch_size_val: null
+  lr: 0.001
+  weight_decay: 0
+  gamma_step: 0.9
+  epochs: 10000
+dynamics:
+  model_type: ode
+  depth: 3
+  width: 512
+  teacher_forcing_init: 0.99
+  teacher_forcing_decay: 0.99
+  teacher_forcing_update: 10
+  run_name: prime-darkness-4874
+inr:
+  inner_steps: 3
+  run_name: data_512_1_20
+  run_dict: null
+wandb:
+  entity: wanghonghui1998
+  project: functa2functa
+  name: data_dyn_512_1_20
+  id: null
+  dir: null
+  sweep_id: null
+jz:
+  program: training/inr.py
+  mode: dev
+  partition: gpu_p2

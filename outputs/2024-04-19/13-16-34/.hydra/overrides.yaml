@@ -1,0 +1,17 @@
+- data.dir=/cluster/home1/whh/workspace/Neural-Spectral-Methods/src/pde/navierstokes/u_Re800_T60_transient_tr256.npy
+- data.dataset_name=navier-stokes-nms
+- data.sub_from=1
+- data.sub_tr=4
+- data.sub_te=4
+- data.sequence_length_optim=
+- data.setting=extrapolation
+- data.sequence_length_in=
+- data.sequence_length_out=
+- fno.modes=12
+- fno.width=32
+- optim.batch_size=16
+- optim.epochs=10000
+- optim.learning_rate=0.001
+- optim.scheduler_step=100
+- optim.scheduler_gamma=0.5
+- wandb.name=fno_nms_wf_r3_last40

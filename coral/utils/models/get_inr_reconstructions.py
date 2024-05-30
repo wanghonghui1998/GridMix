@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 from coral.utils.data.dynamics_dataset import KEY_TO_INDEX
-from coral.utils.data.graph_dataset import KEY_TO_INDEX as GRAPH_KEY_TO_INDEX
+# from coral.utils.data.graph_dataset import KEY_TO_INDEX as GRAPH_KEY_TO_INDEX
 
 
 def get_reconstructions(inr, coords, modulations, z_mean, z_std, dataset_name=None):
@@ -46,29 +46,29 @@ def get_reconstructions(inr, coords, modulations, z_mean, z_std, dataset_name=No
         return predictions #einops.rearrange(predictions, "(b t) ... -> b ... t", t=T)
 
 
-def get_graph_reconstructions(inr, coords, modulations, batch, z_mean, z_std, dataset_name=None):
-    n_samples = coords.shape[0]
+# def get_graph_reconstructions(inr, coords, modulations, batch, z_mean, z_std, dataset_name=None):
+#     n_samples = coords.shape[0]
 
-    c = len(list(inr.keys()))
-    modulations = einops.rearrange(modulations, "b (c l) -> b l c", c=c)     
+#     c = len(list(inr.keys()))
+#     modulations = einops.rearrange(modulations, "b (c l) -> b l c", c=c)     
 
-    if type(inr) == dict:
-        # create predictions with shape ( (b t) dx dy c)
-        predictions = torch.zeros(*coords.shape[:-1], c).cuda()
-        #print('pred totottoot', predictions.shape)
-        for to_encode in inr.keys():
-            idx = GRAPH_KEY_TO_INDEX[dataset_name][to_encode]
-            inr_model = inr[to_encode]
-            z_m = z_mean[to_encode].repeat(n_samples, 1, 1).squeeze().cuda()
-            z_s = z_std[to_encode].repeat(n_samples, 1, 1).squeeze().cuda()
+#     if type(inr) == dict:
+#         # create predictions with shape ( (b t) dx dy c)
+#         predictions = torch.zeros(*coords.shape[:-1], c).cuda()
+#         #print('pred totottoot', predictions.shape)
+#         for to_encode in inr.keys():
+#             idx = GRAPH_KEY_TO_INDEX[dataset_name][to_encode]
+#             inr_model = inr[to_encode]
+#             z_m = z_mean[to_encode].repeat(n_samples, 1, 1).squeeze().cuda()
+#             z_s = z_std[to_encode].repeat(n_samples, 1, 1).squeeze().cuda()
 
-            #print("mod toto", modulations[batch].shape)
-            #print('z_m', z_m.shape, z_s.shape)
+#             #print("mod toto", modulations[batch].shape)
+#             #print('z_m', z_m.shape, z_s.shape)
 
-            with torch.no_grad():
-                pred = inr_model.modulated_forward(
-                    coords, modulations[batch, :, idx] * z_s + z_m
-                )
-                predictions[..., idx] = pred.squeeze()
+#             with torch.no_grad():
+#                 pred = inr_model.modulated_forward(
+#                     coords, modulations[batch, :, idx] * z_s + z_m
+#                 )
+#                 predictions[..., idx] = pred.squeeze()
 
-        return predictions
+#         return predictions

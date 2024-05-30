@@ -18,6 +18,7 @@ data:
   same_grid: True
   seq_inter_len : 20
   seq_extra_len : 20
+  n_cond: 0 
 optim:
   batch_size: 64
   batch_size_val: 
@@ -25,6 +26,8 @@ optim:
   weight_decay: 0
   gamma_step : 0.9
   epochs : 1000
+  n_steps: 1000
+  lr_adapt: 0.01
 
 dynamics:
   model_type: ode
@@ -41,12 +44,15 @@ inr:
   run_dict:
 
 wandb:
-  entity: "spatiotemp-isir"
+  entity: "wanghonghui1998"
   project: "functa2functa"
   name: 
   id: 
   dir: 
   sweep_id: 
+  saved_checkpoint: False
+  checkpoint_path:
+  evaluate:
 
 
 jz: 

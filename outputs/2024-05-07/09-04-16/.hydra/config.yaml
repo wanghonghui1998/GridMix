@@ -1,0 +1,46 @@
+data:
+  dir: /cluster/nvme4a/whh/dataset/ns_nms/u_Re800_T60_transient_tr256.npy
+  dataset_name: navier-stokes-nms-40-64
+  data_to_encode: null
+  ntrain: null
+  ntest: null
+  sub_from: 1
+  sub_tr: 4
+  sub_te: 4
+  seed: 123
+  same_grid: true
+  seq_inter_len: 20
+  seq_extra_len: 20
+optim:
+  batch_size: 64
+  batch_size_val: null
+  lr: 0.001
+  weight_decay: 0
+  gamma_step: 0.9
+  epochs: 10000
+  n_steps: 1000
+  lr_adapt: 0.01
+dynamics:
+  model_type: mamba
+  depth: 6
+  width: 512
+  teacher_forcing_init: 0.99
+  teacher_forcing_decay: 0.99
+  teacher_forcing_update: 10
+  ar_mode: false
+  run_name: prime-darkness-4874
+inr:
+  inner_steps: 3
+  run_name: wf_r3_last40_T64
+  run_dict: null
+wandb:
+  entity: wanghonghui1998
+  project: functa2functa
+  name: dyn_mamba6l_wf_r3_last40_T64
+  id: dyn_mamba6l_S256_wf_r3_last40_T64
+  dir: null
+  sweep_id: null
+jz:
+  program: training/inr.py
+  mode: dev
+  partition: gpu_p2

@@ -1,0 +1,48 @@
+data:
+  dir: /cluster/nvme4a/whh/dataset/sst/data_zone_3.h5
+  dataset_name: sst-11-22
+  data_to_encode: null
+  ntrain: null
+  ntest: null
+  sub_from: 1
+  sub_tr: 1
+  sub_te: 1
+  seed: 123
+  same_grid: true
+  seq_inter_len: 11
+  seq_extra_len: 11
+  n_cond: 4
+optim:
+  batch_size: 64
+  batch_size_val: null
+  lr: 0.001
+  weight_decay: 0
+  gamma_step: 0.9
+  epochs: 10000
+  n_steps: 1000
+  lr_adapt: 0.01
+dynamics:
+  model_type: ode
+  depth: 3
+  width: 512
+  teacher_forcing_init: 0.99
+  teacher_forcing_decay: 0.99
+  teacher_forcing_update: 10
+  hippo_n: 16
+  memory_size: 0
+  run_name: prime-darkness-4874
+inr:
+  inner_steps: 3
+  run_name: sst_zone_3
+  run_dict: null
+wandb:
+  entity: wanghonghui1998
+  project: functa2functa
+  name: dyn_odeset_sst_zone_3
+  id: dyn_odeset_sst_S202_zone_bs64_3
+  dir: null
+  sweep_id: null
+jz:
+  program: training/inr.py
+  mode: dev
+  partition: gpu_p2

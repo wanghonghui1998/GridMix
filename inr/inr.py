@@ -36,7 +36,7 @@ def main(cfg: DictConfig) -> None:
         run_id = cfg.wandb.id
         run_name = cfg.wandb.name
         checkpoint = torch.load(cfg.wandb.checkpoint_path)
-        cfg = checkpoint['cfg']
+        # cfg = checkpoint['cfg']
     elif saved_checkpoint == False:
         #wandb
         entity = cfg.wandb.entity
@@ -73,6 +73,8 @@ def main(cfg: DictConfig) -> None:
     test_inner_steps = cfg.optim.test_inner_steps
     epochs = cfg.optim.epochs
 
+    update_modulations=cfg.optim.update_modulations
+    # print(epochs)
     # inr
     model_type = cfg.inr.model_type
     latent_dim = cfg.inr.latent_dim
@@ -177,19 +179,21 @@ def main(cfg: DictConfig) -> None:
     test_loader = torch.utils.data.DataLoader(
         testset,
         batch_size=batch_size_val,
-        shuffle=True,
+        shuffle=False,
         num_workers=1,
     ) 
 
     inr = create_inr_instance(
         cfg, input_dim=input_dim, output_dim=output_dim, device="cuda:0"
     )
-
+    print(inr)
     alpha = nn.Parameter(torch.Tensor([lr_code]).to(device))
     meta_lr_code = meta_lr_code
     weight_decay_lr_code = weight_decay_code
-
-    optimizer = torch.optim.AdamW(
+    
+    update_alpha = cfg.optim.update_alpha
+    if update_alpha:
+        optimizer = torch.optim.AdamW(
         [
             {"params": inr.parameters(), "lr": lr_inr},
             {"params": alpha, "lr": meta_lr_code, "weight_decay": weight_decay_lr_code},
@@ -197,6 +201,16 @@ def main(cfg: DictConfig) -> None:
         lr=lr_inr,
         weight_decay=0,
     )
+    else:
+        # print('not optmize alpha')
+        optimizer = torch.optim.AdamW(
+            [
+                {"params": inr.parameters(), "lr": lr_inr},
+                # {"params": alpha, "lr": meta_lr_code, "weight_decay": weight_decay_lr_code},
+            ],
+            lr=lr_inr,
+            weight_decay=0,
+        )
 
     if saved_checkpoint:
         inr.load_state_dict(checkpoint['inr'])
@@ -204,7 +218,7 @@ def main(cfg: DictConfig) -> None:
         epoch_start = checkpoint['epoch']
         alpha = checkpoint['alpha']
         best_loss = checkpoint['loss']
-        cfg = checkpoint['cfg']
+        # cfg = checkpoint['cfg']
         print("epoch_start, alpha, best_loss", epoch_start, alpha.item(), best_loss)
         print("cfg : ", cfg)
     elif saved_checkpoint == False:
@@ -236,12 +250,19 @@ def main(cfg: DictConfig) -> None:
         step_show_last = step == epochs - 1
 
         for substep, (images, modulations, coords, idx) in enumerate(train_loader):
+            # print(alpha)
             inr.train()
-            images = images.to(device)
-            modulations = modulations.to(device)
-            coords = coords.to(device)
+            images = images.to(device)  # torch.Size([128, 64, 64, 1])
+            modulations = modulations.to(device)    # torch.Size([128, 128])
+            coords = coords.to(device)  # torch.Size([128, 64, 64, 2])            
             n_samples = images.shape[0]
-
+            # print(images.shape)
+            if not update_modulations:
+                input_modulations = torch.zeros_like(modulations)
+            else:
+                input_modulations = modulations
+            # import pdb; pdb.set_trace()
+            # print(input_modulations.mean())
             outputs = outer_step(
                 inr,
                 coords,
@@ -253,7 +274,8 @@ def main(cfg: DictConfig) -> None:
                 gradient_checkpointing=False,
                 use_rel_loss=use_rel_loss,
                 loss_type="mse",
-                modulations=torch.zeros_like(modulations),
+                # modulations=torch.zeros_like(modulations),
+                modulations=input_modulations,
             )
 
             optimizer.zero_grad()
@@ -267,6 +289,23 @@ def main(cfg: DictConfig) -> None:
             if use_rel_loss:
                 rel_train_mse += outputs["rel_loss"].item() * n_samples
 
+            # debug: visualize 
+            # reconstructions = outputs["reconstructions"]
+            # from visualize import write_image_pair 
+            # # import pdb; pdb.set_trace()
+            # write_image_pair(images.detach().cpu().numpy(), reconstructions.detach().cpu().numpy(), 0, path=os.path.join(run.dir, 'pred.png'))
+
+            if update_modulations:
+                trainset[idx] = outputs["modulations"].detach().cpu()
+                # modulations = outputs["modulations"].detach()
+            # subsubstep += 1
+            # print(f'{subsubstep} alpha {alpha.item()}, loss {loss.item()}')
+            # import imageio.v2 as imageio
+            # modulations = modulations.reshape(1,6,64,64,1).cpu().numpy()
+            # for image_idx in range(6):
+            #     gamma = modulations[0,image_idx]
+            #     imageio.imwrite(os.path.join(run.dir, f'{image_idx}.png'), (255*(gamma-gamma.min())/(gamma.max()-gamma.min())).astype(np.uint8))
+            # return
         train_loss = fit_train_mse / ntrain
 
         if model_type=="fourier_features":
