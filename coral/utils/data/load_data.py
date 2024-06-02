@@ -1163,6 +1163,11 @@ def get_navier_stokes_nms_first40_total64(filename, seq_inter_len=20, seq_extra_
 def get_navier_stokes_nms_first40_total64_wonorm(filename, seq_inter_len=20, seq_extra_len=20):
    
     train_path = str(filename)
+    if not os.path.exists(train_path):
+        print(f'path do not exists: {train_path}')
+        train_path = train_path.replace('nvme4a', 'home1')
+        print(f'switch to in xiaobai: {train_path}')
+        assert os.path.exists(train_path)
     test_path = train_path[:-4] + '_test' + train_path[-4:]
 
     data_train = np.load(train_path)
@@ -1198,6 +1203,11 @@ def get_navier_stokes_nms_first40_total64_wonorm(filename, seq_inter_len=20, seq
 def get_navier_stokes_nms_last40_total64_wonorm(filename, seq_inter_len=20, seq_extra_len=20):
    
     train_path = str(filename)
+    if not os.path.exists(train_path):
+        print(f'path do not exists: {train_path}')
+        train_path = train_path.replace('nvme4a', 'home1')
+        print(f'switch to in xiaobai: {train_path}')
+        assert os.path.exists(train_path)
     test_path = train_path[:-4] + '_test' + train_path[-4:]
 
     data_train = np.load(train_path)
