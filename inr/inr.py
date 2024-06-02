@@ -2,6 +2,7 @@ import os
 import sys
 from pathlib import Path
 from pickletools import OpcodeInfo
+import math 
 
 sys.path.append(str(Path(__file__).parents[1]))
 print(sys.executable)
@@ -74,6 +75,7 @@ def main(cfg: DictConfig) -> None:
     epochs = cfg.optim.epochs
 
     update_modulations=cfg.optim.update_modulations
+    random_init=cfg.optim.random_init
     # print(epochs)
     # inr
     model_type = cfg.inr.model_type
@@ -187,6 +189,8 @@ def main(cfg: DictConfig) -> None:
         cfg, input_dim=input_dim, output_dim=output_dim, device="cuda:0"
     )
     print(inr)
+    if random_init:
+        random_init_std = 0.001 * math.sqrt(1.0 / cfg.inr.hidden_dim)
     alpha = nn.Parameter(torch.Tensor([lr_code]).to(device))
     meta_lr_code = meta_lr_code
     weight_decay_lr_code = weight_decay_code
@@ -258,7 +262,10 @@ def main(cfg: DictConfig) -> None:
             n_samples = images.shape[0]
             # print(images.shape)
             if not update_modulations:
-                input_modulations = torch.zeros_like(modulations)
+                if random_init:
+                    input_modulations = random_init_std * torch.randn_like(modulations)
+                else:
+                    input_modulations = torch.zeros_like(modulations)
             else:
                 input_modulations = modulations
             # import pdb; pdb.set_trace()
@@ -322,6 +329,10 @@ def main(cfg: DictConfig) -> None:
                 coords = coords.to(device)
                 n_samples = images.shape[0]
 
+                if random_init:
+                    input_modulations = random_init_std * torch.randn_like(modulations)
+                else:
+                    input_modulations = torch.zeros_like(modulations)
                 outputs = outer_step(
                     inr,
                     coords,
@@ -333,7 +344,8 @@ def main(cfg: DictConfig) -> None:
                     gradient_checkpointing=False,
                     use_rel_loss=use_rel_loss,
                     loss_type="mse",
-                    modulations=torch.zeros_like(modulations),
+                    # modulations=torch.zeros_like(modulations),
+                    modulations=input_modulations,
                 )
 
                 loss = outputs["loss"]

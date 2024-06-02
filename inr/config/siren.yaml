@@ -33,6 +33,7 @@ optim:
   n_steps : 1000
   epochs : 10000
   update_modulations: False
+  random_init: False 
   update_alpha: True 
   lr_adapt: 0.01
   use_cl: False
