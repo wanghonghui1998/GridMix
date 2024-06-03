@@ -4,11 +4,11 @@ import einops
 from torchdiffeq import odeint
 from coral.utils.models.scheduling import ode_scheduling
 from coral.utils.models.get_inr_reconstructions import get_reconstructions
-from visualize import write_image_pair 
+from visualize import write_image_pair, write_image  
 
 def batch_eval_loop(model, inr, loader, timestamps, detailed_mse, 
                      n, multichannel, z_mean, z_std, dataset_name, 
-                     interpolation_seq, n_cond, visual_first=0, visual_path=''):
+                     interpolation_seq, n_cond, visual_first=0, visual_path='', visual_mod=0):
     interpolation_seq = interpolation_seq - n_cond
     visual=True
     if interpolation_seq:
@@ -67,6 +67,15 @@ def batch_eval_loop(model, inr, loader, timestamps, detailed_mse,
                     # print(pred_reshape.shape, images_reshape.shape)
                     write_image_pair(images_reshape[visual_idx], pred_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}.png', cmap='twilight_shifted', divider=2)
                     write_image_pair(images_reshape[visual_idx], gt_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}_gt.png', cmap='twilight_shifted', divider=2)
+                if visual_mod > 0:
+                    modulations_v = modulations.permute(0,2,1)
+                    modulations_v = modulations_v.reshape(modulations_v.shape[0], modulations_v.shape[1], -1, visual_mod, visual_mod)
+                    divider = 2 * modulations_v.shape[2]
+                    modulations_v = modulations_v.permute(0,2,1,3,4).reshape(modulations_v.shape[0], -1, visual_mod, visual_mod, 1).detach().cpu().numpy()
+                    for visual_idx in range(visual_first):
+                        write_image(modulations_v[visual_idx], modulations_v[visual_idx], 0, path=visual_path+f'_{visual_idx}_mod.png', cmap='twilight_shifted', divider=divider)
+
+
                 visual=False 
         pred_mse_inter /= n
         pred_mse_extra /= n

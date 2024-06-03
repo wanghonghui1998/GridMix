@@ -416,14 +416,14 @@ def main(cfg: DictConfig) -> None:
                     model, inr, train_extra_loader,
                     timestamps_test, detailed_train_eval_mse,
                     ntrain, multichannel, z_mean, z_std,
-                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'train_{epoch_start}')
+                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'train_{epoch_start}'), visual_mod=grid_size
                 )
 
         pred_test_inter_mse, code_test_inter_mse, pred_test_extra_mse, code_test_extra_mse, pred_test_mse, detailed_test_mse = batch_eval_loop(
                     model, inr, test_loader,
                     timestamps_test, detailed_test_mse,
                     ntest, multichannel, z_mean, z_std,
-                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'test_{epoch_start}')
+                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'test_{epoch_start}'), visual_mod=grid_size
                 )
         print(f'train inter mse {pred_train_inter_mse}, train_extra_mse {pred_train_extra_mse}, test inter mse {pred_test_inter_mse}, test extra mse {pred_test_extra_mse}')
         return 
