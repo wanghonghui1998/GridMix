@@ -432,6 +432,10 @@ def get_dynamics_data(
     # if isinstance(sub_from, int):
     #     grid_tr = dynamics_subsample(grid_tr, sub_from)
     #     u_train = dynamics_subsample(u_train, sub_from)
+    grid_tr_extra_mask_tr = grid_tr_extra.clone()
+    u_eval_extrapolation_mask_tr = u_eval_extrapolation.clone()
+    grid_te_mask_tr = grid_te.clone()
+    u_test_mask_tr = u_test.clone()
 
     if isinstance(sub_tr, int):
         grid_tr = dynamics_subsample(grid_tr, sub_tr)
@@ -447,9 +451,12 @@ def get_dynamics_data(
 
     if isinstance(sub_tr, float) and (sub_tr < 1):
         if same_grid:
+            # import pdb; pdb.set_trace()
             tmp = einops.rearrange(u_train, "b ... c t -> b (...) c t")
             num_points = tmp.shape[1]
+            # torch.manual_seed(0)
             perm = torch.randperm(num_points)
+            # print(perm[:10])
             mask_tr = perm[: int(sub_tr * len(perm))].clone().sort()[0]
             grid_tr = dynamics_subsample(grid_tr, mask_tr)
             u_train = dynamics_subsample(u_train, mask_tr)
@@ -466,6 +473,10 @@ def get_dynamics_data(
             num_points = tmp.shape[1]
             perm = torch.randperm(num_points)
             mask_tr_eval = perm[: int(sub_tr * len(perm))].clone().sort()[0]
+            # debug
+            # grid_tr_extra_mask_tr = dynamics_subsample(grid_tr_extra, mask_tr)
+            # u_eval_extrapolation_mask_tr = dynamics_subsample(u_eval_extrapolation, mask_tr)
+
             grid_tr_extra = dynamics_subsample(grid_tr_extra, mask_tr_eval)
             u_eval_extrapolation = dynamics_subsample(u_eval_extrapolation, mask_tr_eval)
 
@@ -480,6 +491,10 @@ def get_dynamics_data(
             num_points = tmp.shape[1]
             perm = torch.randperm(num_points)
             mask_te = perm[: int(sub_te * len(perm))].clone().sort()[0]
+            # debug
+            # grid_te_mask_tr = dynamics_subsample(grid_te, mask_tr)
+            # u_test_mask_tr = dynamics_subsample(u_test, mask_tr)
+
             grid_te = dynamics_subsample(grid_te, mask_te)
             u_test = dynamics_subsample(u_test, mask_te)
 
@@ -488,7 +503,8 @@ def get_dynamics_data(
                 u_test, grid_te, sub_te
             )
 
-    return u_train, u_eval_extrapolation, u_test, grid_tr, grid_tr_extra, grid_te
+    # return u_train, u_eval_extrapolation, u_test, grid_tr, grid_tr_extra, grid_te
+    return u_train, u_eval_extrapolation, u_test, u_eval_extrapolation_mask_tr, u_test_mask_tr, grid_tr, grid_tr_extra, grid_te, grid_tr_extra_mask_tr, grid_te_mask_tr
 
 
 def get_kdv(filename, ntrain, ntest):

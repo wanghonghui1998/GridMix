@@ -170,8 +170,7 @@ def main(cfg: DictConfig) -> None:
             sub_from = 1
 
     set_seed(seed)
-
-    (u_train, u_train_eval, u_test, grid_tr, grid_tr_extra, grid_te) = get_dynamics_data(
+    (u_train, u_train_eval, u_test, u_train_eval_mask_tr, u_test_mask_tr, grid_tr, grid_tr_extra, grid_te, grid_tr_extra_mask_tr, grid_te_mask_tr) = get_dynamics_data(
         data_dir,
         dataset_name,
         ntrain,
@@ -183,9 +182,25 @@ def main(cfg: DictConfig) -> None:
         sub_te=sub_te,
         same_grid=same_grid,
     )
-    print(
-        f"data: {dataset_name}, u_train: {u_train.shape}, u_train_eval: {u_train_eval.shape}, u_test: {u_test.shape}")
+
+    # (u_train, u_train_eval, u_test, grid_tr, grid_tr_extra, grid_te) = get_dynamics_data(
+    #     data_dir,
+    #     dataset_name,
+    #     ntrain,
+    #     ntest,
+    #     seq_inter_len=seq_inter_len,
+    #     seq_extra_len=seq_extra_len,
+    #     sub_from=sub_from,
+    #     sub_tr=sub_tr,
+    #     sub_te=sub_te,
+    #     same_grid=same_grid,
+    # )
+    # import pdb; pdb.set_trace()
+    # assert torch.any(grid_tr_extra_mask_tr[0,:,:,0]==grid_tr[0,:,:,0])
+    # assert torch.any(grid_te_mask_tr[0,:,:,0]==grid_tr[0,:,:,0])
+    print(f"data: {dataset_name}, u_train: {u_train.shape}, u_train_eval: {u_train_eval.shape}, u_test: {u_test.shape}")
     print(f"grid: grid_tr: {grid_tr.shape}, grid_tr_extra: {grid_tr_extra.shape}, grid_te: {grid_te.shape}")
+    print(f" u_train_eval_mask_tr: {u_train_eval_mask_tr.shape}, u_test_mask_tr {u_test_mask_tr.shape}, grid_tr_extra_mask_tr {grid_tr_extra_mask_tr.shape}, grid_te_mask_tr {grid_te_mask_tr.shape}")
 
     if data_to_encode == None:
         run.tags = (
@@ -209,6 +224,13 @@ def main(cfg: DictConfig) -> None:
     )
     testset = TemporalDatasetWithCode(
         u_test, grid_te, latent_dim, dataset_name, data_to_encode
+    )
+
+    trainset_extra_mask_tr = TemporalDatasetWithCode(
+        u_train_eval_mask_tr, grid_tr_extra_mask_tr, latent_dim, dataset_name, data_to_encode
+    )
+    testset_mask_tr = TemporalDatasetWithCode(
+        u_test_mask_tr, grid_te_mask_tr, latent_dim, dataset_name, data_to_encode
     )
 
     #total frames trainset
@@ -239,6 +261,7 @@ def main(cfg: DictConfig) -> None:
             output_dim=output_dim,
         )
         print(inr)
+
         modulations = load_dynamics_modulations(
             trainset,
             trainset_extra,
@@ -252,6 +275,21 @@ def main(cfg: DictConfig) -> None:
             data_to_encode=None,
             try_reload=False,
         )
+        
+        # import pdb; pdb.set_trace()
+        # modulations = load_dynamics_modulations(
+        #     trainset,
+        #     trainset_extra,
+        #     testset,
+        #     inr,
+        #     root_dir / "modulations",
+        #     load_run_name,
+        #     inner_steps=inner_steps,
+        #     alpha=alpha,
+        #     batch_size=2,
+        #     data_to_encode=None,
+        #     try_reload=False,
+        # )
         z_train = modulations["z_train"]
         z_train_extra = modulations["z_train_extra"]
         z_test = modulations["z_test"]
@@ -340,6 +378,8 @@ def main(cfg: DictConfig) -> None:
     trainset.z = z_train
     trainset_extra.z = z_train_extra
     testset.z = z_test
+    trainset_extra_mask_tr.z = z_train_extra
+    testset_mask_tr.z = z_test
 
     print('ztrain', z_train.shape, z_train.mean(), z_train.std())
     print('ztrain_extra', z_train_extra.shape, z_train_extra.mean(), z_train_extra.std())
@@ -367,6 +407,99 @@ def main(cfg: DictConfig) -> None:
         num_workers=1,
     )
 
+    train_extra_mask_tr_loader = torch.utils.data.DataLoader(
+        trainset_extra_mask_tr,
+        batch_size=batch_size//2,
+        shuffle=False,
+        num_workers=1,
+        pin_memory=True,
+    )
+    test_mask_tr_loader = torch.utils.data.DataLoader(
+        testset_mask_tr,
+        batch_size=batch_size_val//2,
+        shuffle=False,
+        num_workers=1,
+    )
+    pred_train_mse = 0
+    for substep, (images, modulations, coords, idx) in enumerate(train_loader):
+
+        images = images.cuda()
+        modulations = modulations.cuda()
+        coords = coords.cuda()
+        n_samples = images.shape[0]
+
+        if multichannel:
+            modulations = einops.rearrange(modulations, "b l c t -> b (l c) t")
+
+        modulations = modulations[...,n_cond:]
+        images = images[...,n_cond:]
+        coords = coords[...,n_cond:]
+
+        z_pred = modulations
+        pred = get_reconstructions(
+            inr, coords, z_pred, z_mean, z_std, dataset_name
+        )
+        pred_train_mse += ((pred - images) ** 2).mean() * n_samples
+        
+        if multichannel:
+            detailed_train_mse.aggregate(pred, images)
+    pred_train_mse /= ntrain
+    print(f'train {pred_train_mse}')
+
+    pred_train_mse = 0
+    for substep, (images, modulations, coords, idx) in enumerate(train_extra_mask_tr_loader):
+
+        images = images.cuda()
+        modulations = modulations.cuda()
+        coords = coords.cuda()
+        n_samples = images.shape[0]
+
+        if multichannel:
+            modulations = einops.rearrange(modulations, "b l c t -> b (l c) t")
+
+        modulations = modulations[...,n_cond:]
+        images = images[...,n_cond:]
+        coords = coords[...,n_cond:]
+
+        z_pred = modulations
+        pred = get_reconstructions(
+            inr, coords, z_pred, z_mean, z_std, dataset_name
+        )
+        pred_train_mse += ((pred - images) ** 2).mean() * n_samples
+        
+        if multichannel:
+            detailed_train_mse.aggregate(pred, images)
+    pred_train_mse /= ntrain
+    print(f'train extra {pred_train_mse}')
+
+    pred_train_mse = 0
+    for substep, (images, modulations, coords, idx) in enumerate(test_mask_tr_loader):
+
+        images = images.cuda()
+        modulations = modulations.cuda()
+        coords = coords.cuda()
+        n_samples = images.shape[0]
+
+        if multichannel:
+            modulations = einops.rearrange(modulations, "b l c t -> b (l c) t")
+
+        modulations = modulations[...,n_cond:]
+        images = images[...,n_cond:]
+        coords = coords[...,n_cond:]
+
+        z_pred = modulations
+        pred = get_reconstructions(
+            inr, coords, z_pred, z_mean, z_std, dataset_name
+        )
+        pred_train_mse += ((pred - images) ** 2).mean() * n_samples
+        
+        if multichannel:
+            detailed_train_mse.aggregate(pred, images)
+    pred_train_mse /= ntest
+    print(f'test {pred_train_mse}')
+    import pdb; pdb.set_trace()
+
+        
     c = z_train.shape[2] if multichannel else 1 
     modes=12
     width=32
@@ -437,6 +570,21 @@ def main(cfg: DictConfig) -> None:
 
         pred_test_inter_mse, code_test_inter_mse, pred_test_extra_mse, code_test_extra_mse, pred_test_mse, detailed_test_mse = batch_eval_loop(
                     model, inr, test_loader,
+                    timestamps_test, detailed_test_mse,
+                    ntest, multichannel, z_mean, z_std,
+                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'test_{epoch_start}'), visual_mod=grid_size
+                )
+        print(f'train inter mse {pred_train_inter_mse}, train_extra_mse {pred_train_extra_mse}, test inter mse {pred_test_inter_mse}, test extra mse {pred_test_extra_mse}')
+
+        pred_train_inter_mse, code_train_inter_mse, pred_train_extra_mse, code_train_extra_mse, total_pred_train_mse, detailed_train_eval_mse = batch_eval_loop(
+                    model, inr, train_extra_loader_mask_tr,
+                    timestamps_test, detailed_train_eval_mse,
+                    ntrain, multichannel, z_mean, z_std,
+                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'train_{epoch_start}'), visual_mod=grid_size
+                )
+
+        pred_test_inter_mse, code_test_inter_mse, pred_test_extra_mse, code_test_extra_mse, pred_test_mse, detailed_test_mse = batch_eval_loop(
+                    model, inr, test_loader_mask_tr,
                     timestamps_test, detailed_test_mse,
                     ntest, multichannel, z_mean, z_std,
                     dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'test_{epoch_start}'), visual_mod=grid_size

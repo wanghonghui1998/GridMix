@@ -60,13 +60,14 @@ def batch_eval_loop(model, inr, loader, timestamps, detailed_mse,
                 gt = get_reconstructions(
                     inr, coords, modulations, z_mean, z_std, dataset_name
                 )
-                gt_reshape = gt.permute(0,4,1,2,3).detach().cpu().numpy()
-                pred_reshape = pred.permute(0,4,1,2,3).detach().cpu().numpy()
-                images_reshape = images.permute(0,4,1,2,3).detach().cpu().numpy()
-                for visual_idx in range(visual_first):
-                    # print(pred_reshape.shape, images_reshape.shape)
-                    write_image_pair(images_reshape[visual_idx], pred_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}.png', cmap='twilight_shifted', divider=2)
-                    write_image_pair(images_reshape[visual_idx], gt_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}_gt.png', cmap='twilight_shifted', divider=2)
+                if gt.dim() == 5:
+                    gt_reshape = gt.permute(0,4,1,2,3).detach().cpu().numpy()
+                    pred_reshape = pred.permute(0,4,1,2,3).detach().cpu().numpy()
+                    images_reshape = images.permute(0,4,1,2,3).detach().cpu().numpy()
+                    for visual_idx in range(visual_first):
+                        # print(pred_reshape.shape, images_reshape.shape)
+                        write_image_pair(images_reshape[visual_idx], pred_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}.png', cmap='twilight_shifted', divider=2)
+                        write_image_pair(images_reshape[visual_idx], gt_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}_gt.png', cmap='twilight_shifted', divider=2)
                 if visual_mod > 0:
                     modulations_v = modulations.permute(0,2,1)
                     modulations_v = modulations_v.reshape(modulations_v.shape[0], modulations_v.shape[1], -1, visual_mod, visual_mod)
@@ -111,6 +112,29 @@ def batch_eval_loop(model, inr, loader, timestamps, detailed_mse,
 
             if multichannel:
                 detailed_mse.aggregate(pred, images)
+
+            if visual and visual_first > 0:
+                gt = get_reconstructions(
+                    inr, coords, modulations, z_mean, z_std, dataset_name
+                )
+                if gt.dim() == 5:
+                    gt_reshape = gt.permute(0,4,1,2,3).detach().cpu().numpy()
+                    pred_reshape = pred.permute(0,4,1,2,3).detach().cpu().numpy()
+                    images_reshape = images.permute(0,4,1,2,3).detach().cpu().numpy()
+                    for visual_idx in range(visual_first):
+                        # print(pred_reshape.shape, images_reshape.shape)
+                        write_image_pair(images_reshape[visual_idx], pred_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}.png', cmap='twilight_shifted', divider=1)
+                        write_image_pair(images_reshape[visual_idx], gt_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}_gt.png', cmap='twilight_shifted', divider=1)
+                if visual_mod > 0:
+                    modulations_v = modulations.permute(0,2,1)
+                    modulations_v = modulations_v.reshape(modulations_v.shape[0], modulations_v.shape[1], -1, visual_mod, visual_mod)
+                    divider = 1 * modulations_v.shape[2]
+                    modulations_v = modulations_v.permute(0,2,1,3,4).reshape(modulations_v.shape[0], -1, visual_mod, visual_mod, 1).detach().cpu().numpy()
+                    for visual_idx in range(visual_first):
+                        write_image(modulations_v[visual_idx], modulations_v[visual_idx], 0, path=visual_path+f'_{visual_idx}_mod.png', cmap='twilight_shifted', divider=divider)
+
+
+                visual=False 
 
         code_mse /= n
         total_pred_mse /= n

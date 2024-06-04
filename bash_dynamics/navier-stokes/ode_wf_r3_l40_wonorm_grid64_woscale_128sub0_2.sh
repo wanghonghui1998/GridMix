@@ -36,15 +36,15 @@ teacher_forcing_update=10
 inner_steps=3
 
 # saved_checkpoint=True
-evaluate=True 
+# evaluate=True 
 # checkpoint_path='/cluster/home1/whh/workspace/wandb/sst-11-22/model/dyn_grid64_V0_bs128_sst_zone_full_'$zone_id'_ck.pt'
 
-grid_size=64
+grid_size=$1
 grid_channel=3
 run_name_suffix=''
 
 #run_name="toasty-darkness-5007"  #"desert-sponge-4958" # "eager-field-4969" # splendid-yogurt-4959 # "desert-sponge-4958" # misunderstood-sunset-4916
 run_name='grid'$grid_size'_woscale_bs128_wf_r3_last40_T64_128sub0_2-wonorm2'
-name='dyn_grid'$grid_size'_woscale_bs128_wf_r3_last40_T64_128sub0_2-wonorm2'
-id='dyn_grid'$grid_size'_woscale_bs128_wf_r3_S256_last40_T64_128sub0_2-wonorm2'
-python3 dynamics_modeling/train_grid.py "inr.grid_channel=$grid_channel" "inr.run_name_suffix=$run_name_suffix" "inr.grid_size=$grid_size" "data.dir=$dir" "data.sub_from=$sub_from" "data.same_grid=$same_grid" "data.dataset_name=$dataset_name" "dynamics.width=$width" "dynamics.depth=$depth" "data.sub_tr=$sub_tr" "data.sub_te=$sub_te" "optim.epochs=$epochs" "data.seq_inter_len=$seq_inter_len" "data.seq_extra_len=$seq_extra_len" "optim.batch_size=$batch_size" "optim.lr=$lr"  "dynamics.teacher_forcing_update=$teacher_forcing_update" "inr.run_name=$run_name" "wandb.name=$name" "wandb.id=$id" "wandb.evaluate=$evaluate" #"wandb.saved_checkpoint=$saved_checkpoint" "wandb.checkpoint_path=$checkpoint_path" 
+name='dyn_grid'$grid_size'_woscale_bs128_wf_r3_last40_T64_128sub0_2-wonorm2_debug'
+id='dyn_grid'$grid_size'_woscale_bs128_wf_r3_S256_last40_T64_128sub0_2-wonorm2_debug'
+python3 dynamics_modeling/train_grid_debug.py "inr.grid_channel=$grid_channel" "inr.run_name_suffix=$run_name_suffix" "inr.grid_size=$grid_size" "data.dir=$dir" "data.sub_from=$sub_from" "data.same_grid=$same_grid" "data.dataset_name=$dataset_name" "dynamics.width=$width" "dynamics.depth=$depth" "data.sub_tr=$sub_tr" "data.sub_te=$sub_te" "optim.epochs=$epochs" "data.seq_inter_len=$seq_inter_len" "data.seq_extra_len=$seq_extra_len" "optim.batch_size=$batch_size" "optim.lr=$lr"  "dynamics.teacher_forcing_update=$teacher_forcing_update" "inr.run_name=$run_name" "wandb.name=$name" "wandb.id=$id" #"wandb.evaluate=$evaluate" "wandb.saved_checkpoint=$saved_checkpoint" "wandb.checkpoint_path=$checkpoint_path" 
