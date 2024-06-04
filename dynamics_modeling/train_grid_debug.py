@@ -147,12 +147,12 @@ def main(cfg: DictConfig) -> None:
         multichannel = False
         tmp = torch.load(root_dir / "inr" / f"{load_run_name}.pt")
         latent_dim = tmp["cfg"].inr.latent_dim
-        try:
-            sub_from = tmp["cfg"].data.sub_from
-        except:
-            sub_from = 1
+        # try:
+        #     sub_from = tmp["cfg"].data.sub_from
+        # except:
+        #     sub_from = 1
 
-        sub_tr = tmp["cfg"].data.sub_tr
+        # sub_tr = tmp["cfg"].data.sub_tr
         seed = tmp["cfg"].data.seed
 
     elif load_run_dict is not None:
@@ -565,29 +565,29 @@ def main(cfg: DictConfig) -> None:
                     model, inr, train_extra_loader,
                     timestamps_test, detailed_train_eval_mse,
                     ntrain, multichannel, z_mean, z_std,
-                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'train_{epoch_start}'), visual_mod=grid_size
+                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'train_{epoch_start}'), visual_mod=0
                 )
 
         pred_test_inter_mse, code_test_inter_mse, pred_test_extra_mse, code_test_extra_mse, pred_test_mse, detailed_test_mse = batch_eval_loop(
                     model, inr, test_loader,
                     timestamps_test, detailed_test_mse,
                     ntest, multichannel, z_mean, z_std,
-                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'test_{epoch_start}'), visual_mod=grid_size
+                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'test_{epoch_start}'), visual_mod=0
                 )
         print(f'train inter mse {pred_train_inter_mse}, train_extra_mse {pred_train_extra_mse}, test inter mse {pred_test_inter_mse}, test extra mse {pred_test_extra_mse}')
 
         pred_train_inter_mse, code_train_inter_mse, pred_train_extra_mse, code_train_extra_mse, total_pred_train_mse, detailed_train_eval_mse = batch_eval_loop(
-                    model, inr, train_extra_loader_mask_tr,
+                    model, inr, train_extra_mask_tr_loader,
                     timestamps_test, detailed_train_eval_mse,
                     ntrain, multichannel, z_mean, z_std,
-                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'train_{epoch_start}'), visual_mod=grid_size
+                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'train_128_{epoch_start}'), visual_mod=0
                 )
 
         pred_test_inter_mse, code_test_inter_mse, pred_test_extra_mse, code_test_extra_mse, pred_test_mse, detailed_test_mse = batch_eval_loop(
-                    model, inr, test_loader_mask_tr,
+                    model, inr, test_mask_tr_loader,
                     timestamps_test, detailed_test_mse,
                     ntest, multichannel, z_mean, z_std,
-                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'test_{epoch_start}'), visual_mod=grid_size
+                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'test_128_{epoch_start}'), visual_mod=0
                 )
         print(f'train inter mse {pred_train_inter_mse}, train_extra_mse {pred_train_extra_mse}, test inter mse {pred_test_inter_mse}, test extra mse {pred_test_extra_mse}')
         return 

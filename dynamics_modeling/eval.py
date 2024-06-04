@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import numpy as np 
 import einops
 from torchdiffeq import odeint
 from coral.utils.models.scheduling import ode_scheduling
@@ -67,7 +68,10 @@ def batch_eval_loop(model, inr, loader, timestamps, detailed_mse,
                     for visual_idx in range(visual_first):
                         # print(pred_reshape.shape, images_reshape.shape)
                         write_image_pair(images_reshape[visual_idx], pred_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}.png', cmap='twilight_shifted', divider=2)
+                        error = np.abs(images_reshape[visual_idx] - pred_reshape[visual_idx])
+                        write_image(error, error, 0, path=visual_path+f'error_{visual_idx}.png', cmap='twilight_shifted', divider=2)
                         write_image_pair(images_reshape[visual_idx], gt_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}_gt.png', cmap='twilight_shifted', divider=2)
+
                 if visual_mod > 0:
                     modulations_v = modulations.permute(0,2,1)
                     modulations_v = modulations_v.reshape(modulations_v.shape[0], modulations_v.shape[1], -1, visual_mod, visual_mod)
