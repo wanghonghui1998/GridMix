@@ -432,11 +432,11 @@ def get_dynamics_data(
     # if isinstance(sub_from, int):
     #     grid_tr = dynamics_subsample(grid_tr, sub_from)
     #     u_train = dynamics_subsample(u_train, sub_from)
-    grid_tr_extra_mask_tr = grid_tr_extra.clone()
-    u_eval_extrapolation_mask_tr = u_eval_extrapolation.clone()
-    grid_te_mask_tr = grid_te.clone()
-    u_test_mask_tr = u_test.clone()
-
+    # grid_tr_extra_mask_tr = grid_tr_extra.clone()
+    # u_eval_extrapolation_mask_tr = u_eval_extrapolation.clone()
+    # grid_te_mask_tr = grid_te.clone()
+    # u_test_mask_tr = u_test.clone()
+    # import pdb; pdb.set_trace()
     if isinstance(sub_tr, int):
         grid_tr = dynamics_subsample(grid_tr, sub_tr)
         u_train = dynamics_subsample(u_train, sub_tr)
@@ -503,8 +503,8 @@ def get_dynamics_data(
                 u_test, grid_te, sub_te
             )
 
-    # return u_train, u_eval_extrapolation, u_test, grid_tr, grid_tr_extra, grid_te
-    return u_train, u_eval_extrapolation, u_test, u_eval_extrapolation_mask_tr, u_test_mask_tr, grid_tr, grid_tr_extra, grid_te, grid_tr_extra_mask_tr, grid_te_mask_tr
+    return u_train, u_eval_extrapolation, u_test, grid_tr, grid_tr_extra, grid_te
+    # return u_train, u_eval_extrapolation, u_test, u_eval_extrapolation_mask_tr, u_test_mask_tr, grid_tr, grid_tr_extra, grid_te, grid_tr_extra_mask_tr, grid_te_mask_tr
 
 
 def get_kdv(filename, ntrain, ntest):
