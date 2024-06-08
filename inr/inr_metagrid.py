@@ -15,15 +15,14 @@ import wandb
 from omegaconf import DictConfig, OmegaConf
 
 from coral.losses import batch_mse_rel_fn
-from coral.metalearning import outer_step, outer_step_extra_grid
+from coral.metalearning import outer_step_metagrid, outer_step
 from coral.mlp import MLP, Derivative, ResNet
 from coral.utils.data.dynamics_dataset import TemporalDatasetWithCode, rearrange
-from coral.utils.data.load_data import get_dynamics_data_extra_grid, set_seed
+from coral.utils.data.load_data import get_dynamics_data, set_seed
 from coral.utils.models.load_inr import create_inr_instance
 from coral.utils.plot import show
-from visualize import write_image
 
-@hydra.main(config_path="config/", config_name="siren.yaml")
+@hydra.main(config_path="config/", config_name="siren_metagrid.yaml")
 def main(cfg: DictConfig) -> None:
 
     # neceassary for some reason now
@@ -77,6 +76,7 @@ def main(cfg: DictConfig) -> None:
 
     update_modulations=cfg.optim.update_modulations
     random_init=cfg.optim.random_init
+    grid_ratio = cfg.optim.grid_ratio
     # print(epochs)
     # inr
     model_type = cfg.inr.model_type
@@ -123,7 +123,8 @@ def main(cfg: DictConfig) -> None:
     os.makedirs(str(RESULTS_DIR), exist_ok=True)
     
     set_seed(seed)
-    u_train, u_eval_extrapolation, u_test, u_eval_extrapolation_mask_tr, u_test_mask_tr, grid_tr, grid_tr_extra, grid_te, grid_tr_extra_mask_tr, grid_te_mask_tr = get_dynamics_data_extra_grid(
+
+    (u_train, u_eval_extrapolation, u_test, grid_tr, grid_tr_extra, grid_te) = get_dynamics_data(
         data_dir,
         dataset_name,
         ntrain,
@@ -152,9 +153,6 @@ def main(cfg: DictConfig) -> None:
     trainset = TemporalDatasetWithCode(
         u_train, grid_tr, latent_dim, dataset_name, data_to_encode
     )
-    trainset_extra_grid = TemporalDatasetWithCode(
-        u_eval_extrapolation_mask_tr, grid_tr_extra_mask_tr, latent_dim, dataset_name, data_to_encode
-    )
     testset = TemporalDatasetWithCode(
         u_test, grid_te, latent_dim, dataset_name, data_to_encode
     )
@@ -166,7 +164,6 @@ def main(cfg: DictConfig) -> None:
 
     # transforms datasets shape into (N * T, Dx, Dy, C)
     trainset = rearrange(trainset, dataset_name)
-    trainset_extra_grid = rearrange(trainset_extra_grid, dataset_name)
     testset = rearrange(testset, dataset_name)
 
     #total frames trainset
@@ -178,15 +175,7 @@ def main(cfg: DictConfig) -> None:
     train_loader = torch.utils.data.DataLoader(
         trainset,
         batch_size=batch_size,
-        shuffle=False,
-        num_workers=1,
-        pin_memory=True,
-    )
-
-    train_loader_extra_grid = torch.utils.data.DataLoader(
-        trainset,
-        batch_size=batch_size,
-        shuffle=False,
+        shuffle=True,
         num_workers=1,
         pin_memory=True,
     )
@@ -196,14 +185,14 @@ def main(cfg: DictConfig) -> None:
         shuffle=False,
         num_workers=1,
     ) 
-    set_seed(seed)
+
     inr = create_inr_instance(
         cfg, input_dim=input_dim, output_dim=output_dim, device="cuda:0"
     )
     print(inr)
     if random_init:
         random_init_std = 0.001 * math.sqrt(1.0 / cfg.inr.hidden_dim)
-    alpha = nn.Parameter(torch.Tensor([1*lr_code]).to(device))
+    alpha = nn.Parameter(torch.Tensor([lr_code]).to(device))
     meta_lr_code = meta_lr_code
     weight_decay_lr_code = weight_decay_code
     
@@ -268,124 +257,68 @@ def main(cfg: DictConfig) -> None:
         for substep, (images, modulations, coords, idx) in enumerate(train_loader):
             # print(alpha)
             inr.train()
-            if u_train.dim() == 5:
-
-                images = u_train[0:1, :, :, :, 0]
-                coords = grid_tr[0:1, :, :, :, 0]    
-                images_extra_grid = u_eval_extrapolation_mask_tr[0:1, :, :, :, 0]
-                coords_extra_grid = grid_tr_extra_mask_tr[0:1, :, :, :, 0]    
-            else:
-                images = u_train[0:1, :, :, 0]
-                coords = grid_tr[0:1, :, :, 0]    
-                images_extra_grid = u_eval_extrapolation_mask_tr[0:1, :, :, 0]
-                coords_extra_grid = grid_tr_extra_mask_tr[0:1, :, :, 0]    
-            print(images.shape, coords.shape, images_extra_grid.shape, coords_extra_grid.shape)
-            # import pdb; pdb.set_trace()
             images = images.to(device)  # torch.Size([128, 64, 64, 1])
             modulations = modulations.to(device)    # torch.Size([128, 128])
-            coords = coords.to(device)  # torch.Size([128, 64, 64, 2])    
-            images_extra_grid = images_extra_grid.to(device)
-            coords_extra_grid = coords_extra_grid.to(device)   
-            num_points = images.shape[1]*images.shape[2]
-            # print(images.shape, coords.shape)
-            # torch.manual_seed(0)
-            # perm = torch.randperm(num_points)
-            # print(perm[:10])
-            # perm = perm[:int(0.9*num_points)].clone().sort()[0]
-            # images = images[0:1].reshape(1, num_points, 1)[:,perm]
-            # modulations = modulations[0:1]
-            # coords = coords[0:1].reshape(1, num_points, 2)[:,perm]
-            images = images[0:1]
-            modulations = modulations[0:1]
-            coords = coords[0:1]
+            coords = coords.to(device)  # torch.Size([128, 64, 64, 2])         
+            if coords.dim() == 4:
+                coords = coords.reshape(coords.shape[0], -1, coords.shape[-1])
+                images = images.reshape(images.shape[0], -1, images.shape[-1])
+
             n_samples = images.shape[0]
-            print(images.shape)
-            print(coords.shape)
-            # import pdb; pdb.set_trace()
-            for subsubstep in range(20000):
             # print(images.shape)
-                if not update_modulations:
-                    if random_init:
-                        input_modulations = random_init_std * torch.randn_like(modulations)
-                    else:
-                        input_modulations = torch.zeros_like(modulations)
+            if not update_modulations:
+                if random_init:
+                    input_modulations = random_init_std * torch.randn_like(modulations)
                 else:
-                    input_modulations = modulations
-                # import pdb; pdb.set_trace()
-                # print(input_modulations.mean())
-                outputs = outer_step_extra_grid(
-                    inr,
-                    coords,
-                    images,
-                    coords_extra_grid,
-                    images_extra_grid,
-                    inner_steps,
-                    alpha,
-                    is_train=True,
-                    return_reconstructions=False,
-                    gradient_checkpointing=False,
-                    use_rel_loss=use_rel_loss,
-                    loss_type="mse",
-                    # modulations=torch.zeros_like(modulations),
-                    modulations=input_modulations,
-                )
+                    input_modulations = torch.zeros_like(modulations)
+            else:
+                input_modulations = modulations
+            # import pdb; pdb.set_trace()
+            # print(input_modulations.mean())
+            outputs = outer_step_metagrid(
+                inr,
+                coords,
+                images,
+                inner_steps,
+                alpha,
+                grid_ratio,
+                is_train=True,
+                return_reconstructions=False,
+                gradient_checkpointing=False,
+                use_rel_loss=use_rel_loss,
+                loss_type="mse",
+                # modulations=torch.zeros_like(modulations),
+                modulations=input_modulations,
+            )
 
-                optimizer.zero_grad()
-                outputs["loss"].backward(create_graph=False)
-                nn.utils.clip_grad_value_(inr.parameters(), clip_value=1.0)
-                optimizer.step()
-                loss = outputs["loss"].cpu().detach()
-                fit_train_mse += loss.item() * n_samples
-                loss_extra_grid = outputs["loss_extra_grid"].cpu().detach()
-                # mlp regression
-                if use_rel_loss:
-                    rel_train_mse += outputs["rel_loss"].item() * n_samples
+            optimizer.zero_grad()
+            outputs["loss"].backward(create_graph=False)
+            nn.utils.clip_grad_value_(inr.parameters(), clip_value=1.0)
+            optimizer.step()
+            loss = outputs["loss"].cpu().detach()
+            fit_train_mse += loss.item() * n_samples
 
-                # debug: visualize 
-                # reconstructions = outputs["reconstructions"]
-                # from visualize import write_image_pair 
-                # # import pdb; pdb.set_trace()
-                # write_image_pair(images.detach().cpu().numpy(), reconstructions.detach().cpu().numpy(), 0, path=os.path.join(run.dir, 'pred.png'))
+            # mlp regression
+            if use_rel_loss:
+                rel_train_mse += outputs["rel_loss"].item() * n_samples
 
-                if update_modulations:
-                    trainset[idx] = outputs["modulations"].detach().cpu()
-                    # modulations = outputs["modulations"].detach()
-                # subsubstep += 1
-                if subsubstep % 100 == 0:
-                    print(f'{subsubstep} alpha {alpha.item()}, loss {loss.item()} loss_extra_grid {loss_extra_grid.item()}')
-                    if cfg.inr.model_type == 'siren':
-                        pass
-                    else:
-                        visual_path=os.path.join(run.dir, 'traininter')
-                        visual_mod = cfg.inr.grid_size
-                        if cfg.inr.model_type == 'siren_grid_fourier' or cfg.inr.model_type == 'siren_grid_fourier_c':
-                            latent = outputs["modulations"].detach()
-                            latent = latent.reshape(latent.shape[0], 3, 2, 1, 1, visual_mod, visual_mod)
-                            latent_A = latent[:, :, 0]
-                            latent_B = latent[:, :, 1]
-                            modulations_v = (latent_A * inr.cos_term - latent_B * inr.sin_term).reshape(latent.shape[0], 3, visual_mod, visual_mod, -1).sum(-1)
-                            modulations_v = modulations_v.reshape(modulations_v.shape[0], -1, visual_mod, visual_mod, 1).cpu().numpy()
-                        elif cfg.inr.model_type == 'siren_code_fourierc':
-                            latent = outputs["modulations"].detach()
-                            # latent = inr.modulation_net(latent)
-                            latent = latent[:, inr.latent_code:].reshape(latent.shape[0], 3, 2, 1, 1, visual_mod, visual_mod)
-                            latent_A = latent[:, :, 0]
-                            latent_B = latent[:, :, 1]
-                            modulations_v = (latent_A * inr.cos_term - latent_B * inr.sin_term).reshape(latent.shape[0], 3, visual_mod, visual_mod, -1).sum(-1)
-                            modulations_v = modulations_v.reshape(modulations_v.shape[0], -1, visual_mod, visual_mod, 1).detach().cpu().numpy()
+            # debug: visualize 
+            # reconstructions = outputs["reconstructions"]
+            # from visualize import write_image_pair 
+            # # import pdb; pdb.set_trace()
+            # write_image_pair(images.detach().cpu().numpy(), reconstructions.detach().cpu().numpy(), 0, path=os.path.join(run.dir, 'pred.png'))
 
-                        else:
-                            modulations_v = outputs["modulations"].detach().cpu().numpy()
-                            modulations_v = modulations_v.reshape(modulations_v.shape[0], -1, visual_mod, visual_mod, 1)
-                        divider = 1
-                        write_image(modulations_v[0], modulations_v[0], 0, path=visual_path+f'_{subsubstep}_mod.png', cmap='twilight_shifted', divider=divider)
-                # import imageio.v2 as imageio
-                # modulations = modulations.reshape(1,6,64,64,1).cpu().numpy()
-                # for image_idx in range(6):
-                #     gamma = modulations[0,image_idx]
-                #     imageio.imwrite(os.path.join(run.dir, f'{image_idx}.png'), (255*(gamma-gamma.min())/(gamma.max()-gamma.min())).astype(np.uint8))
-                # return
-            return 
+            if update_modulations:
+                trainset[idx] = outputs["modulations"].detach().cpu()
+                # modulations = outputs["modulations"].detach()
+            # subsubstep += 1
+            # print(f'{subsubstep} alpha {alpha.item()}, loss {loss.item()}')
+            # import imageio.v2 as imageio
+            # modulations = modulations.reshape(1,6,64,64,1).cpu().numpy()
+            # for image_idx in range(6):
+            #     gamma = modulations[0,image_idx]
+            #     imageio.imwrite(os.path.join(run.dir, f'{image_idx}.png'), (255*(gamma-gamma.min())/(gamma.max()-gamma.min())).astype(np.uint8))
+            # return
         train_loss = fit_train_mse / ntrain
 
         if model_type=="fourier_features":
@@ -441,6 +374,7 @@ def main(cfg: DictConfig) -> None:
                     "train_loss": train_loss,
                 },
             )
+            print(f'ep {step}: train loss: {train_loss}, test loss: {test_loss}')
 
         else:
             wandb.log(
@@ -467,7 +401,20 @@ def main(cfg: DictConfig) -> None:
                 },
                 f"{RESULTS_DIR}/{run_name}.pt",
             )
-
+        if True in (step_show, step_show_last):
+            torch.save(
+                {
+                    "cfg": cfg,
+                    "epoch": step,
+                    "inr": inr.state_dict(),
+                    "optimizer_inr": optimizer.state_dict(),
+                    "loss": train_loss,
+                    "alpha": alpha,
+                    "grid_tr": grid_tr,
+                    "grid_te": grid_te,
+                },
+                f"{RESULTS_DIR}/{run_name}_ck.pt",
+            )
     return rel_test_loss
 
 if __name__ == "__main__":
