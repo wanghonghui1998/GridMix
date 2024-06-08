@@ -5,7 +5,7 @@ from coral.utils.models.get_inr_reconstructions import get_reconstructions
 from coral.utils.data.load_modulations import load_dynamics_modulations
 from coral.utils.data.load_data import get_dynamics_data, set_seed
 from coral.utils.data.dynamics_dataset import (KEY_TO_INDEX, TemporalDatasetWithCode)
-from coral.mlp import DerivativeFNO
+from coral.mlp import DerivativeFNO, Derivative
 from torchdiffeq import odeint
 from omegaconf import DictConfig, OmegaConf
 import wandb
@@ -255,9 +255,14 @@ def main(cfg: DictConfig) -> None:
         z_train = modulations["z_train"]
         z_train_extra = modulations["z_train_extra"]
         z_test = modulations["z_test"]
+        # import pdb; pdb.set_trace()
+        if cfg.dynamics.normalize_per_ele:
 
-        z_mean = einops.rearrange(z_train, "b l t -> (b t) l").mean(0).reshape(1, latent_dim, 1)
-        z_std = einops.rearrange(z_train, "b l t -> (b t) l").std(0).reshape(1, latent_dim, 1)
+            z_mean = einops.rearrange(z_train, "b l t -> (b t) l").mean(0).reshape(1, latent_dim, 1)
+            z_std = einops.rearrange(z_train, "b l t -> (b t) l").std(0).reshape(1, latent_dim, 1)
+        else:
+            z_mean = z_train.mean().reshape(1, 1, 1).repeat(1, latent_dim, 1)
+            z_std = z_train.std().reshape(1, 1, 1).repeat(1, latent_dim, 1)
         # print(z_train.mean(), z_train.std())
         z_train = (z_train - z_mean) / z_std
         z_train_extra = (z_train_extra - z_mean) / z_std
@@ -368,10 +373,14 @@ def main(cfg: DictConfig) -> None:
     )
 
     c = z_train.shape[2] if multichannel else 1 
-    modes=12
-    width=32
-    model = DerivativeFNO(modes, modes, width, grid_channel, grid_size).cuda()
-
+    if model_type == 'ode':
+        model = Derivative(c, z_train.shape[1], hidden, depth).cuda()
+    elif model_type == 'fno':
+        modes=cfg.dynamics.modes
+        width=32
+        model = DerivativeFNO(modes, modes, width, grid_channel, grid_size).cuda()
+    else:
+        raise NotImplementedError
 
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=lr, weight_decay=weight_decay)

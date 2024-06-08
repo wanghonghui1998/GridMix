@@ -33,9 +33,11 @@ dynamics:
   model_type: ode
   depth: 3
   width: 512
+  modes: 12
   teacher_forcing_init: 0.99
   teacher_forcing_decay: 0.99
   teacher_forcing_update: 10
+  normalize_per_ele: True
   run_name : prime-darkness-4874 # sandy-pyramid-4897 #prime-darkness-4874 #iconic-firefly-4657 #atomic-surf-4656
   
 inr:
