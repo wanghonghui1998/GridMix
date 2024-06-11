@@ -109,7 +109,7 @@ class NeRFEncoding(nn.Module):
             N = coords.shape[0]
             winded = (coords[..., None, :] * self.bands[None,None,:,None]).reshape(
                 N, coords.shape[1], coords.shape[-1] * self.num_freq)
-            encoded = torch.cat([torch.sin(winded), torch.cos(winded)], dim=-1)
+            encoded = torch.cat([torch.sin(2*np.pi*winded), torch.cos(2*np.pi*winded)], dim=-1)
             if self.include_input:
                 encoded = torch.cat([coords, encoded], dim=-1)
 
@@ -118,7 +118,7 @@ class NeRFEncoding(nn.Module):
             winded = (coords[:, None] * self.bands[None, :, None]).reshape(
                 N, coords.shape[1] * self.num_freq
             )
-            encoded = torch.cat([torch.sin(winded), torch.cos(winded)], dim=-1)
+            encoded = torch.cat([torch.sin(2*np.pi*winded), torch.cos(2*np.pi*winded)], dim=-1)
             if self.include_input:
                 encoded = torch.cat([coords, encoded], dim=-1)
         return encoded

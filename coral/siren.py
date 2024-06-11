@@ -4,6 +4,7 @@ from math import sqrt
 import einops
 import torch
 from torch import nn
+import torch.nn.functional as F
 import numpy as np
 
 #from coral.utils.interpolate import knn_interpolate_custom, rescale_coordinate
@@ -1719,6 +1720,407 @@ class ModulatedSirenGrids(Siren):
         # Reshape (batch_size, num_points, dim_out) -> (batch_size, *, dim_out)
         return out.view(*x_shape, out.shape[-1])
 
+
+class ModulatedSirenFields(Siren):
+    """Modulated SIREN model.
+
+    Args:
+        dim_in (int): Dimension of input.
+        dim_hidden (int): Dimension of hidden layers.
+        dim_out (int): Dimension of output.
+        num_layers (int): Number of layers.
+        w0 (float): Omega 0 from SIREN paper.
+        w0_initial (float): Omega 0 for first layer.
+        use_bias (bool): Whether to learn bias in linear layer.
+        modulate_scale (bool): Whether to modulate with scales.
+        modulate_shift (bool): Whether to modulate with shifts.
+        use_latent (bool): If true, use a latent vector which is mapped to
+            modulations, otherwise use modulations directly.
+        latent_dim (int): Dimension of latent vector.
+        modulation_net_dim_hidden (int): Number of hidden dimensions of
+            modulation network.
+        modulation_net_num_layers (int): Number of layers in modulation network.
+            If this is set to 1 will correspond to a linear layer.
+    """
+
+    def __init__(
+        self,
+        dim_in,
+        dim_hidden,
+        dim_out,
+        num_layers,
+        w0=30.0,
+        w0_initial=30.0,
+        use_bias=True,
+        modulate_scale=False,
+        modulate_shift=True,
+        use_latent=False,
+        latent_dim=64,
+        modulation_net_dim_hidden=64,
+        modulation_net_num_layers=1,
+        mu=0,
+        sigma=1,
+        last_activation=None,
+        use_norm=False,
+        grid_size=64,
+        siren_init=True,
+    ):
+        super().__init__(
+            dim_in,
+            dim_hidden,
+            dim_out,
+            num_layers,
+            w0,
+            w0_initial,
+            use_bias,
+            siren_init=siren_init,
+        )
+        # Must modulate at least one of scale and shift
+        assert modulate_scale or modulate_shift
+
+        self.modulate_scale = modulate_scale
+        self.modulate_shift = modulate_shift
+        self.w0 = w0
+        self.w0_initial = w0_initial
+        self.mu = mu
+        self.sigma = sigma
+        self.last_activation = (
+            nn.Identity() if last_activation is None else last_activation
+        )
+        self.grid_size = grid_size 
+        self.grid_channel = num_layers - 1
+        if self.modulate_scale and self.modulate_shift:
+            self.grid_channel *= 2
+        self.use_norm = use_norm
+
+        self.modulation_net = ModulatedSiren(
+            dim_in=dim_in,
+            dim_hidden=dim_hidden,
+            dim_out=self.grid_channel,
+            num_layers=modulation_net_num_layers,
+            w0=30,
+            w0_initial=30,
+            use_bias=use_bias,
+            modulate_scale=False,
+            modulate_shift=True,
+            use_latent=use_latent,
+            latent_dim=latent_dim,
+            modulation_net_dim_hidden=128,
+            modulation_net_num_layers=1,
+            last_activation=last_activation,
+            siren_init=True,
+        )
+        '''
+        # We modulate features at every *hidden* layer of the base network and
+        # therefore have dim_hidden * (num_layers - 1) modulations, since the
+        # last layer is not modulated
+        num_modulations = dim_hidden * (num_layers - 1)
+        if self.modulate_scale and self.modulate_shift:
+            # If we modulate both scale and shift, we have twice the number of
+            # modulations at every layer and feature
+            num_modulations *= 2
+
+        if use_latent:
+            self.modulation_net = LatentToModulation(
+                latent_dim,
+                num_modulations,
+                modulation_net_dim_hidden,
+                modulation_net_num_layers,
+            )
+        else:
+            self.modulation_net = Bias(num_modulations)
+
+        # Initialize scales to 1 and shifts to 0 (i.e. the identity)
+        if not use_latent:
+            if self.modulate_shift and self.modulate_scale:
+                self.modulation_net.bias.data = torch.cat(
+                    (
+                        torch.ones(num_modulations // 2),
+                        torch.zeros(num_modulations // 2),
+                    ),
+                    dim=0,
+                )
+            elif self.modulate_scale:
+                self.modulation_net.bias.data = torch.ones(num_modulations)
+            else:
+                self.modulation_net.bias.data = torch.zeros(num_modulations)
+
+        self.num_modulations = num_modulations
+        '''
+
+    def modulated_forward(self, x, latent):
+        """Forward pass of modulated SIREN model.
+
+        Args:
+            x (torch.Tensor): Shape (batch_size, *, dim_in), where * refers to
+                any spatial dimensions, e.g. (height, width), (height * width,)
+                or (depth, height, width) etc.
+            latent (torch.Tensor): Shape (batch_size, latent_dim). If
+                use_latent=False, then latent_dim = num_modulations.
+
+        Returns:
+            Output features of shape (batch_size, *, dim_out).
+        """
+        # Extract batch_size and spatial dims of x, so we can reshape output
+        x_shape = x.shape[:-1]
+        # Flatten all spatial dimensions, i.e. shape
+        # (batch_size, *, dim_in) -> (batch_size, num_points, dim_in)
+        # import pdb; pdb.set_trace()
+        # latent = latent.reshape(x.shape[0], self.grid_channel, self.grid_size, self.grid_size)
+        # # modulations = nn.functional.grid_sample(latent, 2*x-1, padding_mode='border', align_corners=True)# .reshape(x.shape[0],self.grid_channel, x.shape[1],x.shape[2])
+        # if len(x.shape)==3:
+        #     x = x.unsqueeze(-2)
+        #     modulations = grid_sample(latent, 2*x-1).squeeze(-1)
+        #     # print(modulations.shape)
+        # else:
+        #     modulations = grid_sample(latent, 2*x-1)
+        # modulations = modulations.view(modulations.shape[0], modulations.shape[1], -1)
+
+        # print(latent.shape, modulations.shape)
+        x = x.view(x.shape[0], -1, x.shape[-1])
+        modulations = self.modulation_net.modulated_forward(x, latent)
+        # Shape (batch_size, num_modulations)
+        # modulations = self.modulation_net(latent)
+
+        # Split modulations into shifts and scales and apply them to hidden
+        # features.
+        # mid_idx = (
+        #     self.num_modulations // 2
+        #     if (self.modulate_scale and self.modulate_shift)
+        #     else 0
+        # )
+        idx = 0
+        for module in self.net:
+            if self.modulate_scale:
+                # Shape (batch_size, 1, dim_hidden). Note that we add 1 so
+                # modulations remain zero centered
+                scale = modulations[...,idx:idx+1] + 1.0
+                idx += 1
+            else:
+                scale = 1.0
+
+            if self.modulate_shift:
+                # Shape (batch_size, 1, dim_hidden)
+                shift = modulations[...,idx:idx+1]
+                idx += 1
+            else:
+                shift = 0.0
+
+            x = module.linear(x)
+            if self.use_norm:
+                x = nn.functional.instance_norm(x)
+            x = scale * x + shift  # Broadcast scale and shift across num_points
+            x = module.activation(x)  # (batch_size, num_points, dim_hidden)
+
+            # idx = idx + self.dim_hidden
+
+        # Shape (batch_size, num_points, dim_out)
+        out = self.last_activation(self.last_layer(x))
+        out = out * self.sigma + self.mu
+        # Reshape (batch_size, num_points, dim_out) -> (batch_size, *, dim_out)
+        return out.view(*x_shape, out.shape[-1])
+
+
+class ModulatedSirenFieldsChannel(Siren):
+    """Modulated SIREN model.
+
+    Args:
+        dim_in (int): Dimension of input.
+        dim_hidden (int): Dimension of hidden layers.
+        dim_out (int): Dimension of output.
+        num_layers (int): Number of layers.
+        w0 (float): Omega 0 from SIREN paper.
+        w0_initial (float): Omega 0 for first layer.
+        use_bias (bool): Whether to learn bias in linear layer.
+        modulate_scale (bool): Whether to modulate with scales.
+        modulate_shift (bool): Whether to modulate with shifts.
+        use_latent (bool): If true, use a latent vector which is mapped to
+            modulations, otherwise use modulations directly.
+        latent_dim (int): Dimension of latent vector.
+        modulation_net_dim_hidden (int): Number of hidden dimensions of
+            modulation network.
+        modulation_net_num_layers (int): Number of layers in modulation network.
+            If this is set to 1 will correspond to a linear layer.
+    """
+
+    def __init__(
+        self,
+        dim_in,
+        dim_hidden,
+        dim_out,
+        num_layers,
+        w0=30.0,
+        w0_initial=30.0,
+        use_bias=True,
+        modulate_scale=False,
+        modulate_shift=True,
+        use_latent=False,
+        latent_dim=64,
+        modulation_net_dim_hidden=64,
+        modulation_net_num_layers=1,
+        mu=0,
+        sigma=1,
+        last_activation=None,
+        use_norm=False,
+        grid_size=64,
+        siren_init=True,
+    ):
+        super().__init__(
+            dim_in,
+            dim_hidden,
+            dim_out,
+            num_layers,
+            w0,
+            w0_initial,
+            use_bias,
+            siren_init=siren_init,
+        )
+        # Must modulate at least one of scale and shift
+        assert modulate_scale or modulate_shift
+
+        self.modulate_scale = modulate_scale
+        self.modulate_shift = modulate_shift
+        self.w0 = w0
+        self.w0_initial = w0_initial
+        self.mu = mu
+        self.sigma = sigma
+        self.last_activation = (
+            nn.Identity() if last_activation is None else last_activation
+        )
+        self.grid_size = grid_size 
+        self.grid_channel = dim_hidden * (num_layers - 1)
+        self.dim_hidden = dim_hidden
+        if self.modulate_scale and self.modulate_shift:
+            self.grid_channel *= 2
+        self.use_norm = use_norm
+
+        self.modulation_net = ModulatedSiren(
+            dim_in=dim_in,
+            dim_hidden=dim_hidden,
+            dim_out=self.grid_channel,
+            num_layers=num_layers,
+            w0=w0,
+            w0_initial=w0_initial,
+            use_bias=use_bias,
+            modulate_scale=modulate_scale,
+            modulate_shift=modulate_shift,
+            use_latent=use_latent,
+            latent_dim=latent_dim,
+            modulation_net_dim_hidden=modulation_net_dim_hidden,
+            modulation_net_num_layers=modulation_net_num_layers,
+            last_activation=last_activation,
+        )
+        '''
+        # We modulate features at every *hidden* layer of the base network and
+        # therefore have dim_hidden * (num_layers - 1) modulations, since the
+        # last layer is not modulated
+        num_modulations = dim_hidden * (num_layers - 1)
+        if self.modulate_scale and self.modulate_shift:
+            # If we modulate both scale and shift, we have twice the number of
+            # modulations at every layer and feature
+            num_modulations *= 2
+
+        if use_latent:
+            self.modulation_net = LatentToModulation(
+                latent_dim,
+                num_modulations,
+                modulation_net_dim_hidden,
+                modulation_net_num_layers,
+            )
+        else:
+            self.modulation_net = Bias(num_modulations)
+
+        # Initialize scales to 1 and shifts to 0 (i.e. the identity)
+        if not use_latent:
+            if self.modulate_shift and self.modulate_scale:
+                self.modulation_net.bias.data = torch.cat(
+                    (
+                        torch.ones(num_modulations // 2),
+                        torch.zeros(num_modulations // 2),
+                    ),
+                    dim=0,
+                )
+            elif self.modulate_scale:
+                self.modulation_net.bias.data = torch.ones(num_modulations)
+            else:
+                self.modulation_net.bias.data = torch.zeros(num_modulations)
+
+        self.num_modulations = num_modulations
+        '''
+
+    def modulated_forward(self, x, latent):
+        """Forward pass of modulated SIREN model.
+
+        Args:
+            x (torch.Tensor): Shape (batch_size, *, dim_in), where * refers to
+                any spatial dimensions, e.g. (height, width), (height * width,)
+                or (depth, height, width) etc.
+            latent (torch.Tensor): Shape (batch_size, latent_dim). If
+                use_latent=False, then latent_dim = num_modulations.
+
+        Returns:
+            Output features of shape (batch_size, *, dim_out).
+        """
+        # Extract batch_size and spatial dims of x, so we can reshape output
+        x_shape = x.shape[:-1]
+        # Flatten all spatial dimensions, i.e. shape
+        # (batch_size, *, dim_in) -> (batch_size, num_points, dim_in)
+        # import pdb; pdb.set_trace()
+        # latent = latent.reshape(x.shape[0], self.grid_channel, self.grid_size, self.grid_size)
+        # # modulations = nn.functional.grid_sample(latent, 2*x-1, padding_mode='border', align_corners=True)# .reshape(x.shape[0],self.grid_channel, x.shape[1],x.shape[2])
+        # if len(x.shape)==3:
+        #     x = x.unsqueeze(-2)
+        #     modulations = grid_sample(latent, 2*x-1).squeeze(-1)
+        #     # print(modulations.shape)
+        # else:
+        #     modulations = grid_sample(latent, 2*x-1)
+        # modulations = modulations.view(modulations.shape[0], modulations.shape[1], -1)
+
+        # print(latent.shape, modulations.shape)
+        x = x.view(x.shape[0], -1, x.shape[-1])
+        modulations = self.modulation_net.modulated_forward(x, latent)
+        modulations = modulations.reshape(modulations.shape[0], modulations.shape[1], -1, self.dim_hidden)
+        # Shape (batch_size, num_modulations)
+        # modulations = self.modulation_net(latent)
+
+        # Split modulations into shifts and scales and apply them to hidden
+        # features.
+        # mid_idx = (
+        #     self.num_modulations // 2
+        #     if (self.modulate_scale and self.modulate_shift)
+        #     else 0
+        # )
+        idx = 0
+        for module in self.net:
+            if self.modulate_scale:
+                # Shape (batch_size, 1, dim_hidden). Note that we add 1 so
+                # modulations remain zero centered
+                scale = modulations[:,:,idx] + 1.0
+                idx += 1
+            else:
+                scale = 1.0
+
+            if self.modulate_shift:
+                # Shape (batch_size, 1, dim_hidden)
+                shift = modulations[:,:,idx]
+                idx += 1
+            else:
+                shift = 0.0
+
+            x = module.linear(x)
+            if self.use_norm:
+                x = nn.functional.instance_norm(x)
+            x = scale * x + shift  # Broadcast scale and shift across num_points
+            x = module.activation(x)  # (batch_size, num_points, dim_hidden)
+
+            # idx = idx + self.dim_hidden
+
+        # Shape (batch_size, num_points, dim_out)
+        out = self.last_activation(self.last_layer(x))
+        out = out * self.sigma + self.mu
+        # Reshape (batch_size, num_points, dim_out) -> (batch_size, *, dim_out)
+        return out.view(*x_shape, out.shape[-1])
+
 class ModulatedSirenGridsGlobal(Siren):
     """Modulated SIREN model.
 
@@ -3390,4 +3792,467 @@ class ModulatedSSN(nn.Module):
                 x = torch.sin(layer(x) + modulations[..., j])
         out = self.layers[-1](x)
 
+        return out.view(*x_shape, out.shape[-1])
+
+
+class CorssAttention(nn.Module):
+    # fused_attn: Final[bool]
+
+    def __init__(
+            self,
+            dim: int,
+            num_heads: int = 8,
+            qkv_bias: bool = False,
+            qk_norm: bool = False,
+            attn_drop: float = 0.,
+            proj_drop: float = 0.,
+            norm_layer: nn.Module = nn.LayerNorm,
+    ) -> None:
+        super().__init__()
+        assert dim % num_heads == 0, 'dim should be divisible by num_heads'
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        self.scale = self.head_dim ** -0.5
+        self.fused_attn = False
+
+        self.kv = nn.Linear(dim, dim * 2, bias=qkv_bias)
+        self.q = nn.Linear(dim, dim, bias=qkv_bias)
+        self.q_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+        self.k_norm = norm_layer(self.head_dim) if qk_norm else nn.Identity()
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, query, x: torch.Tensor) -> torch.Tensor:
+        B, N, C = x.shape
+        N_q = query.shape[1]
+        kv = self.kv(x).reshape(B, N, 2, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)  # 2,B,num_head,N,head_dim
+        k, v = kv.unbind(0)
+        q = self.q(query).reshape(B, N_q, self.num_heads, self.head_dim).permute(0,2,1,3)
+        q, k = self.q_norm(q), self.k_norm(k)
+        # import pdb; pdb.set_trace()
+        if self.fused_attn:
+            x = F.scaled_dot_product_attention(
+                q, k, v,
+                dropout_p=self.attn_drop.p if self.training else 0.,
+            )
+        else:
+            q = q * self.scale
+            attn = q @ k.transpose(-2, -1)  # B,num_head,N_q,N
+            attn = attn.softmax(dim=-1)
+            attn = self.attn_drop(attn)
+            x = attn @ v    # B,num_head,N_q,head_dim
+
+        x = x.transpose(1, 2).reshape(B, N_q, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
+class NeRFEncoding(nn.Module):
+    """PyTorch implementation of regular positional embedding, as used in the original NeRF and Transformer papers."""
+
+    def __init__(
+        self,
+        num_freq,
+        max_freq_log2,
+        log_sampling=True,
+        include_input=True,
+        input_dim=3,
+        base_freq=2,
+    ):
+        """Initialize the module.
+        Args:
+            num_freq (int): The number of frequency bands to sample.
+            max_freq_log2 (int): The maximum frequency.
+                                 The bands will be sampled at regular intervals in [0, 2^max_freq_log2].
+            log_sampling (bool): If true, will sample frequency bands in log space.
+            include_input (bool): If true, will concatenate the input.
+            input_dim (int): The dimension of the input coordinate space.
+        Returns:
+            (void): Initializes the encoding.
+        """
+        super().__init__()
+
+        self.num_freq = num_freq
+        self.max_freq_log2 = max_freq_log2
+        self.log_sampling = log_sampling
+        self.include_input = include_input
+        self.out_dim = 0
+        self.base_freq = base_freq
+
+        if include_input:
+            self.out_dim += input_dim
+
+        if self.log_sampling:
+            self.bands = self.base_freq ** torch.linspace(
+                0.0, max_freq_log2, steps=num_freq
+            )
+        else:
+            self.bands = torch.linspace(
+                1, self.base_freq**max_freq_log2, steps=num_freq
+            )
+
+        # The out_dim is really just input_dim + num_freq * input_dim * 2 (for sin and cos)
+        self.out_dim += self.bands.shape[0] * input_dim * 2
+        self.bands = nn.Parameter(self.bands).requires_grad_(False)
+
+    def forward(self, coords, with_batch=True):
+        """Embeds the coordinates.
+        Args:
+            coords (torch.FloatTensor): Coordinates of shape [N, input_dim]
+        Returns:
+            (torch.FloatTensor): Embeddings of shape [N, input_dim + out_dim] or [N, out_dim].
+        """
+        if with_batch:
+            N = coords.shape[0]
+            winded = (coords[..., None, :] * self.bands[None,None,:,None]).reshape(
+                N, coords.shape[1], coords.shape[-1] * self.num_freq)
+            encoded = torch.cat([torch.sin(2*np.pi*winded), torch.cos(2*np.pi*winded)], dim=-1)
+            if self.include_input:
+                encoded = torch.cat([coords, encoded], dim=-1)
+
+        else:
+            N = coords.shape[0]
+            winded = (coords[:, None] * self.bands[None, :, None]).reshape(
+                N, coords.shape[1] * self.num_freq
+            )
+            encoded = torch.cat([torch.sin(2*np.pi*winded), torch.cos(2*np.pi*winded)], dim=-1)
+            if self.include_input:
+                encoded = torch.cat([coords, encoded], dim=-1)
+        return encoded
+
+    # def name(self) -> str:
+    #     """A human readable name for the given wisp module."""
+    #     return "Positional Encoding"
+
+    # def public_properties(self) -> Dict[str, Any]:
+    #     """Wisp modules expose their public properties in a dictionary.
+    #     The purpose of this method is to give an easy table of outwards facing attributes,
+    #     for the purpose of logging, gui apps, etc.
+    #     """
+    #     return {
+    #         "Output Dim": self.out_dim,
+    #         "Num. Frequencies": self.num_freq,
+    #         "Max Frequency": f"2^{self.max_freq_log2}",
+    #         "Include Input": self.include_input,
+    #     }
+
+class ModulatedSirenCA(Siren):
+    """Modulated SIREN model.
+
+    Args:
+        dim_in (int): Dimension of input.
+        dim_hidden (int): Dimension of hidden layers.
+        dim_out (int): Dimension of output.
+        num_layers (int): Number of layers.
+        w0 (float): Omega 0 from SIREN paper.
+        w0_initial (float): Omega 0 for first layer.
+        use_bias (bool): Whether to learn bias in linear layer.
+        modulate_scale (bool): Whether to modulate with scales.
+        modulate_shift (bool): Whether to modulate with shifts.
+        use_latent (bool): If true, use a latent vector which is mapped to
+            modulations, otherwise use modulations directly.
+        latent_dim (int): Dimension of latent vector.
+        modulation_net_dim_hidden (int): Number of hidden dimensions of
+            modulation network.
+        modulation_net_num_layers (int): Number of layers in modulation network.
+            If this is set to 1 will correspond to a linear layer.
+    """
+
+    def __init__(
+        self,
+        dim_coords,
+        dim_in,
+        dim_hidden,
+        dim_out,
+        num_layers,
+        w0=30.0,
+        w0_initial=30.0,
+        use_bias=True,
+        modulate_scale=False,
+        modulate_shift=True,
+        use_latent=False,
+        latent_dim=64,
+        modulation_net_dim_hidden=64,
+        modulation_net_num_layers=1,
+        mu=0,
+        sigma=1,
+        last_activation=None,
+        siren_init=True,
+    ):
+        super().__init__(
+            dim_in,
+            dim_hidden,
+            dim_out,
+            num_layers,
+            w0,
+            w0_initial,
+            use_bias,
+            siren_init,
+        )
+        # Must modulate at least one of scale and shift
+        assert modulate_scale or modulate_shift
+
+        self.modulate_scale = modulate_scale
+        self.modulate_shift = modulate_shift
+        self.w0 = w0
+        self.w0_initial = w0_initial
+        self.mu = mu
+        self.sigma = sigma
+        self.last_activation = (
+            nn.Identity() if last_activation is None else last_activation
+        )
+        self.N_token = latent_dim // dim_in
+        self.modulation_net = CorssAttention(
+            dim=dim_in,
+            num_heads=4,
+            qkv_bias=True,
+            qk_norm=True,
+            attn_drop=0.,
+            proj_drop=0.,
+            norm_layer=nn.LayerNorm,
+        )
+        self.embedding = NeRFEncoding(
+            num_freq=dim_in//(2*dim_coords),
+            max_freq_log2=6,
+            log_sampling=True,
+            include_input=False,
+            input_dim=dim_coords,
+            base_freq=2,
+        )
+
+    def modulated_forward(self, x, latent):
+        """Forward pass of modulated SIREN model.
+
+        Args:
+            x (torch.Tensor): Shape (batch_size, *, dim_in), where * refers to
+                any spatial dimensions, e.g. (height, width), (height * width,)
+                or (depth, height, width) etc.
+            latent (torch.Tensor): Shape (batch_size, latent_dim). If
+                use_latent=False, then latent_dim = num_modulations.
+
+        Returns:
+            Output features of shape (batch_size, *, dim_out).
+        """
+        # Extract batch_size and spatial dims of x, so we can reshape output
+        x_shape = x.shape[:-1]
+        # Flatten all spatial dimensions, i.e. shape
+        # (batch_size, *, dim_in) -> (batch_size, num_points, dim_in)
+
+        x = x.view(x.shape[0], -1, x.shape[-1])
+        x_embedding = self.embedding(x)
+        # print(x_embedding.shape)
+        # import pdb; pdb.set_trace()
+        latent = latent.view(latent.shape[0], self.N_token, -1)
+        # x: torch.Size([128, 4096, 2])
+        # latent: torch.Size([128, 128])
+        # modulations: torch.Size([128, 384])
+        # Shape (batch_size, num_modulations)
+        x = self.modulation_net(x_embedding, latent)
+        
+        # Split modulations into shifts and scales and apply them to hidden
+        # features.
+        # mid_idx = (
+        #     self.num_modulations // 2
+        #     if (self.modulate_scale and self.modulate_shift)
+        #     else 0
+        # )
+        # idx = 0
+        for module in self.net:
+            # if self.modulate_scale:
+            #     # Shape (batch_size, 1, dim_hidden). Note that we add 1 so
+            #     # modulations remain zero centered
+            #     scale = modulations[:, idx: idx +
+            #                         self.dim_hidden].unsqueeze(1) + 1.0
+            # else:
+            #     scale = 1.0
+
+            # if self.modulate_shift:
+            #     # Shape (batch_size, 1, dim_hidden)
+            #     shift = modulations[
+            #         :, mid_idx + idx: mid_idx + idx + self.dim_hidden
+            #     ].unsqueeze(1)
+            # else:
+            #     shift = 0.0
+
+            x = module.linear(x)
+            # x = scale * x + shift  # Broadcast scale and shift across num_points
+            x = module.activation(x)  # (batch_size, num_points, dim_hidden)
+
+            # idx = idx + self.dim_hidden
+
+        # Shape (batch_size, num_points, dim_out)
+        out = self.last_activation(self.last_layer(x))
+        out = out * self.sigma + self.mu
+        # Reshape (batch_size, num_points, dim_out) -> (batch_size, *, dim_out)
+        return out.view(*x_shape, out.shape[-1])
+
+
+class IPC(nn.Module):
+
+    def __init__(
+        self,
+        freq_dim_in,
+        freq_dim_out,
+        composer_dim_out,
+        activation=None,
+    ):
+        super().__init__()
+        self.freq_layer = nn.Linear(freq_dim_in, freq_dim_out)
+        self.freq_act = Sine(1) if activation is None else activation
+        self.composer_dim_out = composer_dim_out
+        self.bias = 1.0 / freq_dim_out
+    
+    def forward(self, x, latent):
+        freq = self.freq_act(self.freq_layer(x))    # (batch_size, -1, freq_dim_out)
+        latent = latent.reshape(latent.shape[0], 1, self.composer_dim_out, -1)
+        modulations = (latent+self.bias) @ freq.unsqueeze(-1)
+        return modulations.squeeze(-1)  # (batch_size, -1, self.composer_dim_out) 
+
+class ModulatedSirenIPC(Siren):
+    """Modulated SIREN model.
+
+    Args:
+        dim_in (int): Dimension of input.
+        dim_hidden (int): Dimension of hidden layers.
+        dim_out (int): Dimension of output.
+        num_layers (int): Number of layers.
+        w0 (float): Omega 0 from SIREN paper.
+        w0_initial (float): Omega 0 for first layer.
+        use_bias (bool): Whether to learn bias in linear layer.
+        modulate_scale (bool): Whether to modulate with scales.
+        modulate_shift (bool): Whether to modulate with shifts.
+        use_latent (bool): If true, use a latent vector which is mapped to
+            modulations, otherwise use modulations directly.
+        latent_dim (int): Dimension of latent vector.
+        modulation_net_dim_hidden (int): Number of hidden dimensions of
+            modulation network.
+        modulation_net_num_layers (int): Number of layers in modulation network.
+            If this is set to 1 will correspond to a linear layer.
+    """
+
+    def __init__(
+        self,
+        dim_coords,
+        dim_in,
+        dim_hidden,
+        dim_out,
+        num_layers,
+        w0=30.0,
+        w0_initial=30.0,
+        use_bias=True,
+        modulate_scale=False,
+        modulate_shift=True,
+        use_latent=False,
+        latent_dim=64,
+        modulation_net_dim_hidden=64,
+        modulation_net_num_layers=1,
+        mu=0,
+        sigma=1,
+        last_activation=None,
+        siren_init=True,
+    ):
+        super().__init__(
+            dim_in,
+            dim_hidden,
+            dim_out,
+            num_layers,
+            w0,
+            w0_initial,
+            use_bias,
+            siren_init,
+        )
+        # Must modulate at least one of scale and shift
+        assert modulate_scale or modulate_shift
+
+        self.modulate_scale = modulate_scale
+        self.modulate_shift = modulate_shift
+        self.w0 = w0
+        self.w0_initial = w0_initial
+        self.mu = mu
+        self.sigma = sigma
+        self.last_activation = (
+            nn.Identity() if last_activation is None else last_activation
+        )
+        # self.N_token = latent_dim // dim_in
+        
+        self.embedding = NeRFEncoding(
+            num_freq=64,
+            max_freq_log2=6,
+            log_sampling=True,
+            include_input=False,
+            input_dim=dim_coords,
+            base_freq=2,
+        )
+
+        self.modulation_net = IPC(
+            freq_dim_in=self.embedding.out_dim,
+            freq_dim_out=latent_dim // dim_in,
+            composer_dim_out=dim_in,
+        )
+
+    def modulated_forward(self, x, latent):
+        """Forward pass of modulated SIREN model.
+
+        Args:
+            x (torch.Tensor): Shape (batch_size, *, dim_in), where * refers to
+                any spatial dimensions, e.g. (height, width), (height * width,)
+                or (depth, height, width) etc.
+            latent (torch.Tensor): Shape (batch_size, latent_dim). If
+                use_latent=False, then latent_dim = num_modulations.
+
+        Returns:
+            Output features of shape (batch_size, *, dim_out).
+        """
+        # Extract batch_size and spatial dims of x, so we can reshape output
+        x_shape = x.shape[:-1]
+        # Flatten all spatial dimensions, i.e. shape
+        # (batch_size, *, dim_in) -> (batch_size, num_points, dim_in)
+
+        x = x.view(x.shape[0], -1, x.shape[-1])
+        x_embedding = self.embedding(x)
+        # print(x_embedding.shape)
+        # import pdb; pdb.set_trace()
+        # latent = latent.view(latent.shape[0], self.N_token, -1)
+        # x: torch.Size([128, 4096, 2])
+        # latent: torch.Size([128, 128])
+        # modulations: torch.Size([128, 384])
+        # Shape (batch_size, num_modulations)
+        x = self.modulation_net(x_embedding, latent)
+        
+        # Split modulations into shifts and scales and apply them to hidden
+        # features.
+        # mid_idx = (
+        #     self.num_modulations // 2
+        #     if (self.modulate_scale and self.modulate_shift)
+        #     else 0
+        # )
+        # idx = 0
+        # for module in self.net:
+        #     # if self.modulate_scale:
+        #     #     # Shape (batch_size, 1, dim_hidden). Note that we add 1 so
+        #     #     # modulations remain zero centered
+        #     #     scale = modulations[:, idx: idx +
+        #     #                         self.dim_hidden].unsqueeze(1) + 1.0
+        #     # else:
+        #     #     scale = 1.0
+
+        #     # if self.modulate_shift:
+        #     #     # Shape (batch_size, 1, dim_hidden)
+        #     #     shift = modulations[
+        #     #         :, mid_idx + idx: mid_idx + idx + self.dim_hidden
+        #     #     ].unsqueeze(1)
+        #     # else:
+        #     #     shift = 0.0
+
+        #     x = module.linear(x)
+        #     # x = scale * x + shift  # Broadcast scale and shift across num_points
+        #     x = module.activation(x)  # (batch_size, num_points, dim_hidden)
+
+        #     # idx = idx + self.dim_hidden
+        x = self.net(x)
+        # Shape (batch_size, num_points, dim_out)
+        out = self.last_activation(self.last_layer(x))
+        out = out * self.sigma + self.mu
+        # Reshape (batch_size, num_points, dim_out) -> (batch_size, *, dim_out)
         return out.view(*x_shape, out.shape[-1])

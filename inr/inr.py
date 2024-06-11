@@ -190,7 +190,7 @@ def main(cfg: DictConfig) -> None:
     )
     print(inr)
     if random_init:
-        random_init_std = 0.001 * math.sqrt(1.0 / cfg.inr.hidden_dim)
+        random_init_std = 1 * math.sqrt(1.0 / cfg.inr.hidden_dim)   # 0.001 for LR
     alpha = nn.Parameter(torch.Tensor([lr_code]).to(device))
     meta_lr_code = meta_lr_code
     weight_decay_lr_code = weight_decay_code
@@ -320,7 +320,7 @@ def main(cfg: DictConfig) -> None:
 
         if use_rel_loss:
             rel_train_loss = rel_train_mse / ntrain
-
+        print(f'{step} alpha {alpha.item()}, train loss {train_loss}')
         if True in (step_show, step_show_last):
             for images, modulations, coords, idx in test_loader:
                 inr.eval()
@@ -368,6 +368,7 @@ def main(cfg: DictConfig) -> None:
                     "train_loss": train_loss,
                 },
             )
+            print(f'{step} alpha {alpha.item()}, train loss {train_loss}, test loss {test_loss}')
 
         else:
             wandb.log(
