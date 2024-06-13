@@ -5,7 +5,7 @@ from coral.utils.models.get_inr_reconstructions import get_reconstructions
 from coral.utils.data.load_modulations import load_dynamics_modulations
 from coral.utils.data.load_data import get_dynamics_data, set_seed
 from coral.utils.data.dynamics_dataset import (KEY_TO_INDEX, TemporalDatasetWithCode)
-from coral.mlp import DerivativeFNO, Derivative
+from coral.mlp import DerivativeCodeGridGlobal, DerivativeFNO, Derivative, DerivativeCodeGrid, DerivativeCodeGridConcat
 from torchdiffeq import odeint
 from omegaconf import DictConfig, OmegaConf
 import wandb
@@ -17,7 +17,7 @@ import einops
 import os
 import sys
 from pathlib import Path
-from dynamics_modeling.eval import batch_eval_loop
+from dynamics_modeling.eval_grid_code import batch_eval_loop
 
 sys.path.append(str(Path(__file__).parents[1]))
 
@@ -262,12 +262,21 @@ def main(cfg: DictConfig) -> None:
             z_std = einops.rearrange(z_train, "b l t -> (b t) l").std(0).reshape(1, latent_dim, 1)
         elif cfg.dynamics.normalize_per_channel:
             z_train_rearrange = einops.rearrange(z_train, "b l t -> (b t) l")
-            z_train_grid = z_train_rearrange.reshape(-1, grid_channel, grid_size*grid_size).permute(0,2,1).reshape(-1, grid_channel)
-            z_mean = z_train_grid.mean(0).reshape(1, grid_channel, 1).repeat(1,1,grid_size*grid_size).reshape(1,-1,1)
-            z_std = z_train_grid.std(0).reshape(1, grid_channel, 1).repeat(1,1,grid_size*grid_size).reshape(1,-1,1)
+            z_train_code_dim = z_train_rearrange.shape[1] - grid_channel*grid_size*grid_size
+            z_train_code = z_train_rearrange[:,:z_train_code_dim]
+            z_train_grid = z_train_rearrange[:,z_train_code_dim:].reshape(-1, grid_channel, grid_size*grid_size).permute(0,2,1).reshape(-1, grid_channel)
+            z_mean_code = z_train_code.mean(0).reshape(1, z_train_code_dim,1)
+            z_std_code = z_train_code.std(0).reshape(1, z_train_code_dim,1)
+            z_mean_grid = z_train_grid.mean(0).reshape(1, grid_channel, 1).repeat(1,1,grid_size*grid_size).reshape(1,-1,1)
+            z_std_grid = z_train_grid.std(0).reshape(1, grid_channel, 1).repeat(1,1,grid_size*grid_size).reshape(1,-1,1)
+            z_mean = torch.cat([z_mean_code, z_mean_grid], dim=1)
+            z_std = torch.cat([z_std_code, z_std_grid], dim=1)
+            # z_mean = einops.rearrange(z_train, "b l t -> (b t) l").mean(0).reshape(1, latent_dim, 1)
+            # z_std = einops.rearrange(z_train, "b l t -> (b t) l").std(0).reshape(1, latent_dim, 1)
         else:
             z_mean = z_train.mean().reshape(1, 1, 1).repeat(1, latent_dim, 1)
             z_std = z_train.std().reshape(1, 1, 1).repeat(1, latent_dim, 1)
+        
         # print(z_train.mean(), z_train.std())
         z_train = (z_train - z_mean) / z_std
         z_train_extra = (z_train_extra - z_mean) / z_std
@@ -378,15 +387,34 @@ def main(cfg: DictConfig) -> None:
     )
 
     c = z_train.shape[2] if multichannel else 1 
+    code_dim = c*z_train.shape[1]-grid_channel*grid_size*grid_size
     if model_type == 'ode':
         model = Derivative(c, z_train.shape[1], hidden, depth).cuda()
     elif model_type == 'fno':
         modes=cfg.dynamics.modes
         width=32
         model = DerivativeFNO(modes, modes, width, grid_channel, grid_size).cuda()
+    elif model_type == 'code_grid':
+        modes=cfg.dynamics.modes
+        width=32
+        # import pdb; pdb.set_trace()
+        # model = DerivativeFNO(modes, modes, width, grid_channel, grid_size).cuda()
+        model = DerivativeCodeGrid(code_dim, hidden, depth, modes, modes, width, grid_channel, grid_size).cuda()
+    elif model_type == 'code_grid_concat':
+        modes=cfg.dynamics.modes
+        width=32
+        # import pdb; pdb.set_trace()
+        # model = DerivativeFNO(modes, modes, width, grid_channel, grid_size).cuda()
+        model = DerivativeCodeGridConcat(code_dim, modes, modes, width, grid_channel, grid_size).cuda()
+    elif model_type == 'code_grid_global':
+        modes=cfg.dynamics.modes
+        width=32
+        # import pdb; pdb.set_trace()
+        # model = DerivativeFNO(modes, modes, width, grid_channel, grid_size).cuda()
+        model = DerivativeCodeGridGlobal(code_dim, modes, modes, width, grid_channel, grid_size).cuda()
     else:
         raise NotImplementedError
-
+    print(model)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=lr, weight_decay=weight_decay)
     
@@ -442,19 +470,21 @@ def main(cfg: DictConfig) -> None:
     # eval 
     evaluate = cfg.wandb.evaluate
     if evaluate:
-        pred_train_inter_mse, code_train_inter_mse, pred_train_extra_mse, code_train_extra_mse, total_pred_train_mse, detailed_train_eval_mse = batch_eval_loop(
+        pred_train_inter_mse, code_train_inter_mse, pred_train_extra_mse, code_train_extra_mse, total_pred_train_mse, detailed_train_eval_mse, code_train_mse_inter_code, code_train_mse_extra_code, code_train_mse_inter_grid, code_train_mse_extra_grid = batch_eval_loop(
                     model, inr, train_extra_loader,
                     timestamps_test, detailed_train_eval_mse,
                     ntrain, multichannel, z_mean, z_std,
-                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'train_{epoch_start}'), visual_mod=grid_size
+                    dataset_name, T_train, n_cond, code_dim, visual_first=4, visual_path=os.path.join(run.dir, f'train_{epoch_start}'), visual_mod=grid_size
                 )
-
-        pred_test_inter_mse, code_test_inter_mse, pred_test_extra_mse, code_test_extra_mse, pred_test_mse, detailed_test_mse = batch_eval_loop(
+        print(f'modulation--train inter: code {code_train_mse_inter_code}, grid {code_train_mse_inter_grid}, total {code_train_inter_mse}; train extra: code {code_train_mse_extra_code}, grid {code_train_mse_extra_grid}, total {code_train_extra_mse}')
+        pred_test_inter_mse, code_test_inter_mse, pred_test_extra_mse, code_test_extra_mse, pred_test_mse, detailed_test_mse, code_test_mse_inter_code, code_test_mse_extra_code, code_test_mse_inter_grid, code_test_mse_extra_grid = batch_eval_loop(
                     model, inr, test_loader,
                     timestamps_test, detailed_test_mse,
                     ntest, multichannel, z_mean, z_std,
-                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'test_{epoch_start}'), visual_mod=grid_size
+                    dataset_name, T_train, n_cond, code_dim, visual_first=4, visual_path=os.path.join(run.dir, f'test_{epoch_start}'), visual_mod=grid_size
                 )
+        print(f'modulation--test inter: code {code_test_mse_inter_code}, grid {code_test_mse_inter_grid}, total {code_test_inter_mse}; train extra: code {code_test_mse_extra_code}, grid {code_test_mse_extra_grid}, total {code_test_extra_mse}')
+
         print(f'train inter mse {pred_train_inter_mse}, train_extra_mse {pred_train_extra_mse}, test inter mse {pred_test_inter_mse}, test extra mse {pred_test_extra_mse}')
         return 
 
@@ -507,20 +537,20 @@ def main(cfg: DictConfig) -> None:
         scheduler.step(code_train_mse)
 
         if T_train != T_test:
-            pred_train_inter_mse, code_train_inter_mse, pred_train_extra_mse, code_train_extra_mse, total_pred_train_mse, detailed_train_eval_mse = batch_eval_loop(
+            pred_train_inter_mse, code_train_inter_mse, pred_train_extra_mse, code_train_extra_mse, total_pred_train_mse, detailed_train_eval_mse, code_train_mse_inter_code, code_train_mse_extra_code, code_train_mse_inter_grid, code_train_mse_extra_grid = batch_eval_loop(
                 model, inr, train_extra_loader,
                 timestamps_test, detailed_train_eval_mse,
                 ntrain, multichannel, z_mean, z_std,
-                dataset_name, T_train, n_cond
+                dataset_name, T_train, n_cond,code_dim
             )
 
         if True in (step_show, step_show_last):
             if T_train != T_test:
-                pred_test_inter_mse, code_test_inter_mse, pred_test_extra_mse, code_test_extra_mse, pred_test_mse, detailed_test_mse = batch_eval_loop(
+                pred_test_inter_mse, code_test_inter_mse, pred_test_extra_mse, code_test_extra_mse, pred_test_mse, detailed_test_mse, code_test_mse_inter_code, code_test_mse_extra_code, code_test_mse_inter_grid, code_test_mse_extra_grid = batch_eval_loop(
                     model, inr, test_loader,
                     timestamps_test, detailed_test_mse,
                     ntest, multichannel, z_mean, z_std,
-                    dataset_name, T_train,n_cond
+                    dataset_name, T_train,n_cond,code_dim
                 )
 
                 log_dic = {
@@ -573,7 +603,10 @@ def main(cfg: DictConfig) -> None:
                     log_dic.update(dic_train_mse)
                     log_dic.update(dic_test_mse)
             wandb.log(log_dic)
-
+            # print(f'{step} ')
+            print(f'{step} modulation- train inter: code {code_train_mse_inter_code}, grid {code_train_mse_inter_grid}, total {code_train_inter_mse}; train extra: code {code_train_mse_extra_code}, grid {code_train_mse_extra_grid}, total {code_train_extra_mse}')
+            print(f'{step} modulation-  test inter: code {code_test_mse_inter_code}, grid {code_test_mse_inter_grid}, total {code_test_inter_mse}; train extra: code {code_test_mse_extra_code}, grid {code_test_mse_extra_grid}, total {code_test_extra_mse}')
+            print(f'{step} pred- train inter mse {pred_train_inter_mse}, train_extra_mse {pred_train_extra_mse}, test inter mse {pred_test_inter_mse}, test extra mse {pred_test_extra_mse}')
         else:
             wandb.log(
                 {

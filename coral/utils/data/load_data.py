@@ -1898,6 +1898,7 @@ def shape2coordinates(spatial_shape, max_value=1.0):
     coords = []
     for i in range(len(spatial_shape)):
         coords.append(torch.linspace(0.0, max_value, spatial_shape[i]+1)[:-1])
+        # coords.append(torch.linspace(0.0, max_value, spatial_shape[i]))
     # Tensor will have shape (*spatial_shape, len(spatial_shape))
     return torch.stack(torch.meshgrid(*coords, indexing="ij"), dim=-1)
 

@@ -30,7 +30,7 @@ optim:
   lr_adapt: 0.01
 
 dynamics:
-  model_type: ode
+  model_type: fno
   depth: 3
   width: 512
   modes: 12
@@ -38,6 +38,7 @@ dynamics:
   teacher_forcing_decay: 0.99
   teacher_forcing_update: 10
   normalize_per_ele: True
+  normalize_per_channel: False
   run_name : prime-darkness-4874 # sandy-pyramid-4897 #prime-darkness-4874 #iconic-firefly-4657 #atomic-surf-4656
   
 inr:

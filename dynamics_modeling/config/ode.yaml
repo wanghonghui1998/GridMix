@@ -42,6 +42,7 @@ inr:
   inner_steps: 3
   run_name: 
   run_dict:
+  run_name_suffix: ""
 
 wandb:
   entity: "wanghonghui1998"

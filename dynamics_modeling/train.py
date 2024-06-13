@@ -8,6 +8,7 @@ from coral.utils.data.dynamics_dataset import (KEY_TO_INDEX, TemporalDatasetWith
 from coral.mlp import Derivative
 from torchdiffeq import odeint
 from omegaconf import DictConfig, OmegaConf
+import math
 import wandb
 import torch.nn as nn
 import torch
@@ -80,6 +81,7 @@ def main(cfg: DictConfig) -> None:
 
     # inr
     load_run_name = cfg.inr.run_name
+    load_run_name_suffix = cfg.inr.run_name_suffix
     try:
         load_run_dict = dict(cfg.inr.run_dict)
     except TypeError:
@@ -230,7 +232,7 @@ def main(cfg: DictConfig) -> None:
     if load_run_name is not None:
         inr, alpha = load_inr_model(
             root_dir / "inr",
-            load_run_name,
+            load_run_name+load_run_name_suffix,
             data_to_encode,
             input_dim=input_dim,
             output_dim=output_dim,
@@ -454,11 +456,19 @@ def main(cfg: DictConfig) -> None:
             code_train_mse += loss.item() * n_samples
 
             if True in (step_show, step_show_last):
-
                 pred = get_reconstructions(
                     inr, coords, z_pred, z_mean, z_std, dataset_name
                 )
-                pred_train_mse += ((pred - images) ** 2).mean() * n_samples
+                # pred = []
+                # pred_batch_size = 32
+                # for test_id in range(math.ceil(1.0*z_pred.shape[0]/pred_batch_size)):
+                #     pred_id = get_reconstructions(
+                #         inr, coords[test_id*pred_batch_size:(test_id+1)*pred_batch_size], z_pred[test_id*pred_batch_size:(test_id+1)*pred_batch_size], z_mean, z_std, dataset_name
+                #     )
+                #     pred.append(pred_id)
+                #     del pred_id
+                # pred = torch.cat(pred, dim=0)
+                # pred_train_mse += ((pred - images) ** 2).mean() * n_samples
                 
                 if multichannel:
                     detailed_train_mse.aggregate(pred, images)
