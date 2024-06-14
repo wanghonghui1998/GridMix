@@ -18,9 +18,11 @@ from coral.losses import batch_mse_rel_fn
 from coral.metalearning import outer_step_metagrid, outer_step
 from coral.mlp import MLP, Derivative, ResNet
 from coral.utils.data.dynamics_dataset import TemporalDatasetWithCode, rearrange
-from coral.utils.data.load_data import get_dynamics_data, set_seed
+from coral.utils.data.load_data import get_dynamics_data, set_seed, get_dynamics_data_two_grid
 from coral.utils.models.load_inr import create_inr_instance
 from coral.utils.plot import show
+
+from visualize import write_image_pair, write_image  
 
 @hydra.main(config_path="config/", config_name="siren_metagrid.yaml")
 def main(cfg: DictConfig) -> None:
@@ -123,8 +125,7 @@ def main(cfg: DictConfig) -> None:
     os.makedirs(str(RESULTS_DIR), exist_ok=True)
     
     set_seed(seed)
-
-    (u_train, u_eval_extrapolation, u_test, grid_tr, grid_tr_extra, grid_te) = get_dynamics_data(
+    (u_train, u_train_out1, u_train_out2, u_eval_extrapolation, u_eval_extrapolation_in, u_test, u_test_in, grid_tr, grid_tr_out1, grid_tr_out2, grid_tr_extra, grid_tr_extra_in, grid_te, grid_te_in) = get_dynamics_data_two_grid(
         data_dir,
         dataset_name,
         ntrain,
@@ -136,8 +137,21 @@ def main(cfg: DictConfig) -> None:
         sub_te=sub_te,
         same_grid=same_grid,
     )
-    print(f"data: {dataset_name}, u_train: {u_train.shape}, u_eval_extrapolation: {u_eval_extrapolation.shape}, u_test: {u_test.shape}")
-    print(f"grid: grid_tr: {grid_tr.shape}, grid_tr_extra: {grid_tr_extra.shape}, grid_te: {grid_te.shape}")
+
+    # (u_train, u_eval_extrapolation, u_test, grid_tr, grid_tr_extra, grid_te) = get_dynamics_data(
+    #     data_dir,
+    #     dataset_name,
+    #     ntrain,
+    #     ntest,
+    #     seq_inter_len=seq_inter_len,
+    #     seq_extra_len=seq_extra_len,
+    #     sub_from=sub_from,
+    #     sub_tr=sub_tr,
+    #     sub_te=sub_te,
+    #     same_grid=same_grid,
+    # )
+    print(f"data: {dataset_name}, u_train: {u_train.shape}, u_eval_extrapolation: {u_eval_extrapolation.shape}, u_test: {u_test.shape}, u_test_in: {u_test_in.shape}")
+    print(f"grid: grid_tr: {grid_tr.shape}, grid_tr_extra: {grid_tr_extra.shape}, grid_te: {grid_te.shape}, grid_te_in: {grid_te_in.shape}")
     print("same_grid : ", same_grid)
     if data_to_encode == None:
         run.tags = ("inr",) + (model_type,) + (dataset_name,) + (f"sub={sub_tr}",)
@@ -156,7 +170,9 @@ def main(cfg: DictConfig) -> None:
     testset = TemporalDatasetWithCode(
         u_test, grid_te, latent_dim, dataset_name, data_to_encode
     )
-
+    testset_in = TemporalDatasetWithCode(
+        u_test_in, grid_te_in, latent_dim, dataset_name, data_to_encode
+    )
     # trainset coords of shape (N, Dx, Dy, input_dim, T)
     input_dim = trainset.input_dim
     # trainset images of shape (N, Dx, Dy, output_dim, T)
@@ -165,7 +181,7 @@ def main(cfg: DictConfig) -> None:
     # transforms datasets shape into (N * T, Dx, Dy, C)
     trainset = rearrange(trainset, dataset_name)
     testset = rearrange(testset, dataset_name)
-
+    testset_in = rearrange(testset_in, dataset_name)
     #total frames trainset
     ntrain = trainset.z.shape[0]
     #total frames testset
@@ -185,7 +201,14 @@ def main(cfg: DictConfig) -> None:
         shuffle=False,
         num_workers=1,
     ) 
+    test_in_loader = torch.utils.data.DataLoader(
+        testset_in,
+        batch_size=batch_size_val,
+        shuffle=False,
+        num_workers=1,
+    ) 
 
+    set_seed(seed)
     inr = create_inr_instance(
         cfg, input_dim=input_dim, output_dim=output_dim, device="cuda:0"
     )
@@ -245,11 +268,18 @@ def main(cfg: DictConfig) -> None:
         verbose=True,
     )
 
+    save_per_plot = True 
+    plot = 'grid' in model_type
+    visual_mod = cfg.inr.grid_size
+    plot_frame = 40 
+
     for step in range(epoch_start, epochs):
         rel_train_mse = 0
         rel_test_mse = 0
+        rel_test_mse_train_coords = 0
         fit_train_mse = 0
         fit_test_mse = 0
+        fit_test_mse_train_coords = 0
         use_rel_loss = step % 10 == 0
         step_show = step % 100 == 0
         step_show_last = step == epochs - 1
@@ -328,6 +358,8 @@ def main(cfg: DictConfig) -> None:
             rel_train_loss = rel_train_mse / ntrain
 
         if True in (step_show, step_show_last):
+            plot_modulations = []
+            plot_modulations_num = 0
             for images, modulations, coords, idx in test_loader:
                 inr.eval()
                 images = images.to(device)
@@ -353,7 +385,9 @@ def main(cfg: DictConfig) -> None:
                     # modulations=torch.zeros_like(modulations),
                     modulations=input_modulations,
                 )
-
+                if plot and plot_modulations_num < plot_frame:
+                    plot_modulations.append(outputs["modulations"][:plot_frame-plot_modulations_num])
+                    plot_modulations_num += plot_modulations[-1].shape[0]
                 loss = outputs["loss"]
                 fit_test_mse += loss.item() * n_samples
 
@@ -365,7 +399,70 @@ def main(cfg: DictConfig) -> None:
             if use_rel_loss:
                 rel_test_loss = rel_test_mse / ntest
 
+            plot_modulations_train_coords = []
+            plot_modulations_num = 0
+            for images, modulations, coords, idx in test_in_loader:
+                inr.eval()
+                images = images.to(device)
+                modulations = modulations.to(device)
+                coords = coords.to(device)
+               
+                n_samples = images.shape[0]
+
+                if random_init:
+                    input_modulations = random_init_std * torch.randn_like(modulations)
+                else:
+                    input_modulations = torch.zeros_like(modulations)
+                outputs = outer_step(
+                    inr,
+                    coords,
+                    images,
+                    test_inner_steps,
+                    alpha,
+                    is_train=False,
+                    return_reconstructions=False,
+                    gradient_checkpointing=False,
+                    use_rel_loss=use_rel_loss,
+                    loss_type="mse",
+                    # modulations=torch.zeros_like(modulations),
+                    modulations=input_modulations,
+                )
+                if plot and plot_modulations_num < plot_frame:
+                    plot_modulations_train_coords.append(outputs["modulations"][:plot_frame-plot_modulations_num])
+                    plot_modulations_num += plot_modulations_train_coords[-1].shape[0]
+                loss = outputs["loss"]
+                fit_test_mse_train_coords += loss.item() * n_samples
+
+                if use_rel_loss:
+                    rel_test_mse_train_coords += outputs["rel_loss"].item() * n_samples
+            
+            test_loss_train_coords = fit_test_mse_train_coords / ntest
+
+            if use_rel_loss:
+                rel_test_loss_train_coords = rel_test_mse_train_coords / ntest
+
+
+            if plot:
+                plot_modulations = torch.cat(plot_modulations, dim=0)
+                plot_modulations_train_coords = torch.cat(plot_modulations_train_coords, dim=0)
+                modulations_v = plot_modulations.reshape(plot_modulations.shape[0], -1, visual_mod, visual_mod)
+                modulations_v_train_coords = plot_modulations_train_coords.reshape(plot_modulations_train_coords.shape[0], -1, visual_mod, visual_mod)
+                # divider = 2 * modulations_v.shape[1]
+                # modulations_v = modulations_v.permute(1,0,2,3).reshape(-1, visual_mod, visual_mod, 1).detach().cpu().numpy()
+                # visual_path = os.path.join(run.dir, f'testmod_{step}.png') if save_per_plot else os.path.join(run.dir, f'testmod.png') 
+                # write_image(modulations_v, modulations_v, 0, path=visual_path, cmap='twilight_shifted', divider=divider)
+
+                divider = 2 
+                modulations_v = modulations_v.permute(1,0,2,3).unsqueeze(-1).detach().cpu().numpy()
+                modulations_v_train_coords = modulations_v_train_coords.permute(1,0,2,3).unsqueeze(-1).detach().cpu().numpy()
+                for layer_idx in range(modulations_v.shape[0]):
+                    visual_path = os.path.join(run.dir, f'testmod_l{layer_idx}_{step}.png') if save_per_plot else os.path.join(run.dir, f'testmod_l{layer_idx}.png') 
+                    # write_image(modulations_v[layer_idx], modulations_v[layer_idx], 0, path=visual_path, cmap='twilight_shifted', divider=divider)
+                    write_image_pair(modulations_v[layer_idx], modulations_v_train_coords[layer_idx], 0, path=visual_path, cmap='twilight_shifted', divider=divider)
+
+
         if True in (step_show, step_show_last):
+            print(f'{step} alpha {alpha.item()}, train loss {train_loss}, test loss {test_loss}, test loss on train coords {test_loss_train_coords}')
             wandb.log(
                 {
                     "test_rel_loss": rel_test_loss,
@@ -374,7 +471,7 @@ def main(cfg: DictConfig) -> None:
                     "train_loss": train_loss,
                 },
             )
-            print(f'ep {step}: train loss: {train_loss}, test loss: {test_loss}')
+            # print(f'ep {step}: train loss: {train_loss}, test loss: {test_loss}')
 
         else:
             wandb.log(

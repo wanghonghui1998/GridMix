@@ -15,9 +15,9 @@ set -x
 dir='/cluster/nvme4a/whh/dataset/ns_nms/u_Re800_T60_transient_tr256.npy'
 dataset_name="navier-stokes-nms-40-64-wonorm"
 same_grid=True
-sub_from=2
-sub_tr=0.2
-sub_te=0.2
+sub_from=1
+sub_tr=4
+sub_te=4
 seq_inter_len=20
 seq_extra_len=20
 batch_size=64
@@ -48,6 +48,6 @@ model_type='code_grid'
 evaluate=True
 #run_name="toasty-darkness-5007"  #"desert-sponge-4958" # "eager-field-4969" # splendid-yogurt-4959 # "desert-sponge-4958" # misunderstood-sunset-4916
 run_name='metacode+grid'$grid_size'_woscale_128sub0_2_gridratio'$grid_ratio'_step'$inner_steps'_bs128_lr'$lr_code
-name='eval_npc_dyn_metacode+grid'$grid_size'_woscale_128sub0_2_gridratio'$grid_ratio'_step'$inner_steps'_bs128_lr'$lr_code
-id='eval_npc_dyn_metacode+grid'$grid_size'_woscale_128sub0_2_gridratio'$grid_ratio'_step'$inner_steps'_bs128_lr'$lr_code
+name='evalonregulardyn_metacode+grid'$grid_size'_woscale_128sub0_2_gridratio'$grid_ratio'_step'$inner_steps'_bs128_lr'$lr_code
+id='evalonregulardyn_metacode+grid'$grid_size'_woscale_128sub0_2_gridratio'$grid_ratio'_step'$inner_steps'_bs128_lr'$lr_code
 python3 dynamics_modeling/train_grid_code.py "dynamics.model_type=$model_type" "dynamics.normalize_per_channel=$normalize_per_channel" "dynamics.normalize_per_ele=$normalize_per_ele" "dynamics.modes=$modes" "inr.grid_channel=$grid_channel" "inr.run_name_suffix=$run_name_suffix" "inr.grid_size=$grid_size" "data.dir=$dir" "data.sub_from=$sub_from" "data.same_grid=$same_grid" "data.dataset_name=$dataset_name" "dynamics.width=$width" "dynamics.depth=$depth" "data.sub_tr=$sub_tr" "data.sub_te=$sub_te" "optim.epochs=$epochs" "data.seq_inter_len=$seq_inter_len" "data.seq_extra_len=$seq_extra_len" "optim.batch_size=$batch_size" "optim.lr=$lr"  "dynamics.teacher_forcing_update=$teacher_forcing_update" "inr.run_name=$run_name" "wandb.name=$name" "wandb.id=$id" "wandb.evaluate=$evaluate"

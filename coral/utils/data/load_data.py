@@ -289,6 +289,255 @@ def get_operator_data(
         grid_te,
     )
 
+def get_dynamics_data_two_grid(
+    data_dir,
+    dataset_name,
+    ntrain,
+    ntest,
+    seq_inter_len = 20, 
+    seq_extra_len = 20,
+    sub_from=1,
+    sub_tr=1,
+    sub_te=1,
+    same_grid=True,
+):
+    """Get training and test data as well as associated coordinates, depending on the dataset name.
+
+    Args:
+        data_dir (str): path to the dataset directory
+        dataset_name (str): dataset name (e.g. "navier-stokes)
+        ntrain (int): number of training samples
+        ntest (int): number of test samples
+        sub_tr (int or float, optional): when set to int > 1, subsamples x as x[::sub_tr]. When set to float < 1, subsamples x as x[index] where index is a random index of shape int(sub_tr*len(x)). Defaults to 1.
+        sub_tr (int or float, optional): when set to int > 1, subsamples x as x[::sub_te]. When set to float < 1, subsamples x as x[index] where index is a random index of shape int(sub_te*len(x)). Defaults to 1.
+        same_grid (bool, optional): If True, all the trajectories avec the same grids.
+    
+    Raises:
+        NotImplementedError: _description_
+
+    Returns:
+        u_train (torch.Tensor): (ntrain, ..., T)
+        u_test (torch.Tensor): (ntest, ..., T)
+        grid_tr (torch.Tensor): coordinates of u_train
+        grid_te (torch.Tensor): coordinates of u_test
+    """
+
+    data_dir = Path(data_dir)
+
+    u_train_out = None
+    u_test_out = None
+    u_train_ext = None
+    u_test_ext = None
+    grid_tr_out = None
+    grid_te_out = None
+    grid_tr_ext = None
+    grid_te_ext = None
+
+    if dataset_name == "navier-stokes-1e-3":
+        u_train, u_test = get_navier_stokes_fno(
+            data_dir / "ns_V1e-3_N5000_T50.mat")
+
+    elif dataset_name == "navier-stokes-1e-4":
+        u_train, u_test = get_navier_stokes_fno(
+            data_dir / "ns_V1e-4_N10000_T30.mat")
+
+    elif dataset_name == "navier-stokes-1e-5":
+        index_start = 9
+        u_train, u_test = get_navier_stokes_fno(
+            data_dir / "fno" / "NavierStokes_V1e-5_N1200_T20.mat", 1000, 200, sequence_length, index_start
+        )
+
+    elif dataset_name == "navier-stokes-dino":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-dino-40-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_last40_total64(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_total64(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-40-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total64(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-40-64-wonorm":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total64_wonorm(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms-f40-64-wonorm":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_first40_total64_wonorm(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-f40-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_first40_total64(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-40-60":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total60(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms-40-70":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total70(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "sst-11-22":
+        u_train, u_eval_extrapolation, u_test = get_sst_11_22(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "shallow-water-dino":
+        u_train, u_eval_extrapolation, u_test = get_shallow_water_dino(data_dir, seq_inter_len, seq_extra_len)
+
+    else:
+        raise NotImplementedError
+    
+    # u_train should be of shape (N, ..., C, T)
+    if dataset_name in ["shallow-water-dino"]:
+        grid_tr = shape2spherical_coordinates(u_train.shape[1:-2])
+        grid_tr_extra = shape2spherical_coordinates(u_eval_extrapolation.shape[1:-2])
+        grid_te = shape2spherical_coordinates(u_test.shape[1:-2])
+    
+    #elif dataset_name in ['mp-pde-burgers']:
+    #    grid_tr = shape2circular_coordinates(u_train.shape[1:-2])
+    #    grid_te = shape2circular_coordinates(u_test.shape[1:-2])
+
+    else:
+        grid_tr = shape2coordinates(u_train.shape[1:-2])
+        grid_tr_extra = shape2coordinates(u_eval_extrapolation.shape[1:-2])
+        grid_te = shape2coordinates(u_test.shape[1:-2])
+    if u_train_out is not None:
+        grid_tr_out = shape2coordinates(u_train_out.shape[1:-2])
+        grid_te_out = shape2coordinates(u_test_out.shape[1:-2])
+    if u_train_ext is not None:
+        grid_tr_ext = shape2coordinates(u_train_ext.shape[1:-2])
+        grid_te_ext = shape2coordinates(u_test_ext.shape[1:-2])
+
+    # grid_tr should be of shape (N, ..., input_dim)
+    # we need to artificially create a time dimension for the coordinates
+
+    grid_tr = einops.repeat(
+        grid_tr, "... -> b ... t", t=u_train.shape[-1], b=u_train.shape[0]
+    )
+    grid_tr_extra = einops.repeat(
+        grid_tr_extra, "... -> b ... t", t=u_eval_extrapolation.shape[-1], b=u_eval_extrapolation.shape[0]
+    )
+    grid_te = einops.repeat(
+        grid_te, "... -> b ... t", t=u_test.shape[-1], b=u_test.shape[0]
+    )
+
+    # import pdb; pdb.set_trace()
+    if isinstance(sub_from, int):
+        grid_tr = dynamics_subsample(grid_tr, sub_from)
+        u_train = dynamics_subsample(u_train, sub_from)
+
+    if isinstance(sub_from, int):
+        grid_tr_extra = dynamics_subsample(grid_tr_extra, sub_from)
+        u_eval_extrapolation = dynamics_subsample(u_eval_extrapolation, sub_from)
+
+    if isinstance(sub_from, int):
+        grid_te = dynamics_subsample(grid_te, sub_from)
+        u_test = dynamics_subsample(u_test, sub_from)
+
+    # if isinstance(sub_from, int):
+    #     grid_tr = dynamics_subsample(grid_tr, sub_from)
+    #     u_train = dynamics_subsample(u_train, sub_from)
+    # grid_tr_extra_mask_tr = grid_tr_extra.clone()
+    # u_eval_extrapolation_mask_tr = u_eval_extrapolation.clone()
+    # grid_te_mask_tr = grid_te.clone()
+    # u_test_mask_tr = u_test.clone()
+    # import pdb; pdb.set_trace()
+    
+    grid_tr_full = grid_tr.clone() 
+    u_train_full = u_train.clone()
+    grid_tr_extra_full = grid_tr_extra.clone()
+    u_eval_extrapolation_full = u_eval_extrapolation.clone()
+    grid_te_full = grid_te.clone()
+    u_test_full = u_test.clone() 
+    
+    if isinstance(sub_tr, int):
+        grid_tr = dynamics_subsample(grid_tr_full, sub_tr)
+        u_train = dynamics_subsample(u_train_full, sub_tr)
+
+        grid_tr_extra_in = dynamics_subsample(grid_tr_extra_full, sub_tr)
+        u_eval_extrapolation_in = dynamics_subsample(u_eval_extrapolation_full, sub_tr)
+
+        grid_te_in = dynamics_subsample(grid_te_full, sub_tr)
+        u_test_in = dynamics_subsample(u_test_full, sub_tr)
+
+    if isinstance(sub_tr, int):
+        grid_tr_extra = dynamics_subsample(grid_tr_extra_full, sub_tr)
+        u_eval_extrapolation = dynamics_subsample(u_eval_extrapolation_full, sub_tr)
+
+        grid_tr_out1 = dynamics_subsample(grid_tr_full, sub_tr)
+        u_train_out1 = dynamics_subsample(u_train_full, sub_tr)
+
+    if isinstance(sub_te, int):
+        grid_te = dynamics_subsample(grid_te_full, sub_te)
+        u_test = dynamics_subsample(u_test_full, sub_te)
+
+        grid_tr_out2 = dynamics_subsample(grid_tr_full, sub_te)
+        u_train_out2 = dynamics_subsample(u_train_full, sub_te)
+
+    if isinstance(sub_tr, float) and (sub_tr < 1):
+        if same_grid:
+            # import pdb; pdb.set_trace()
+            tmp = einops.rearrange(u_train, "b ... c t -> b (...) c t")
+            num_points = tmp.shape[1]
+            # torch.manual_seed(0)
+            perm = torch.randperm(num_points)
+            # print(perm[:10])
+            mask_tr = perm[: int(sub_tr * len(perm))].clone().sort()[0]
+            grid_tr = dynamics_subsample(grid_tr_full, mask_tr)
+            u_train = dynamics_subsample(u_train_full, mask_tr)
+
+            grid_tr_extra_in = dynamics_subsample(grid_tr_extra_full, mask_tr)
+            u_eval_extrapolation_in = dynamics_subsample(u_eval_extrapolation_full, mask_tr)
+
+            grid_te_in = dynamics_subsample(grid_te_full, mask_tr)
+            u_test_in = dynamics_subsample(u_test_full, mask_tr)
+
+        else:
+            print("computing different grids")
+            u_train, grid_tr, perm = dynamics_different_subsample(
+                u_train, grid_tr, sub_tr
+            )
+
+    if isinstance(sub_tr, float) and (sub_tr < 1):
+        if same_grid:
+            tmp = einops.rearrange(u_eval_extrapolation, "b ... c t -> b (...) c t")
+            num_points = tmp.shape[1]
+            perm = torch.randperm(num_points)
+            mask_tr_eval = perm[: int(sub_tr * len(perm))].clone().sort()[0]
+            # debug
+            # grid_tr_extra_mask_tr = dynamics_subsample(grid_tr_extra, mask_tr)
+            # u_eval_extrapolation_mask_tr = dynamics_subsample(u_eval_extrapolation, mask_tr)
+
+            grid_tr_extra = dynamics_subsample(grid_tr_extra_full, mask_tr_eval)
+            u_eval_extrapolation = dynamics_subsample(u_eval_extrapolation_full, mask_tr_eval)
+
+            grid_tr_out1 = dynamics_subsample(grid_tr_full, mask_tr_eval)
+            u_train_out1 = dynamics_subsample(u_train_full, mask_tr_eval)
+
+        else:
+            u_eval_extrapolation, grid_tr_extra, perm = dynamics_different_subsample(
+                u_eval_extrapolation, grid_tr_extra, sub_tr
+            )
+
+    if isinstance(sub_te, float) and (sub_te < 1):
+        if same_grid:
+            tmp = einops.rearrange(u_test, "b ... c t -> b (...) c t")
+            num_points = tmp.shape[1]
+            perm = torch.randperm(num_points)
+            mask_te = perm[: int(sub_te * len(perm))].clone().sort()[0]
+            # debug
+            # grid_te_mask_tr = dynamics_subsample(grid_te, mask_tr)
+            # u_test_mask_tr = dynamics_subsample(u_test, mask_tr)
+
+            grid_te = dynamics_subsample(grid_te_full, mask_te)
+            u_test = dynamics_subsample(u_test_full, mask_te)
+
+            grid_tr_out2 = dynamics_subsample(grid_tr_full, mask_te)
+            u_train_out2 = dynamics_subsample(u_train_full, mask_te)
+
+        else:
+            u_test, grid_te, perm = dynamics_different_subsample(
+                u_test, grid_te, sub_te
+            )
+
+    return u_train, u_train_out1, u_train_out2, u_eval_extrapolation, u_eval_extrapolation_in, u_test, u_test_in, grid_tr, grid_tr_out1, grid_tr_out2, grid_tr_extra, grid_tr_extra_in, grid_te, grid_te_in
+    # return u_train, u_eval_extrapolation, u_test, u_eval_extrapolation_mask_tr, u_test_mask_tr, grid_tr, grid_tr_extra, grid_te, grid_tr_extra_mask_tr, grid_te_mask_tr
+
 
 def get_dynamics_data(
     data_dir,
@@ -1897,8 +2146,8 @@ def shape2coordinates(spatial_shape, max_value=1.0):
     """
     coords = []
     for i in range(len(spatial_shape)):
-        coords.append(torch.linspace(0.0, max_value, spatial_shape[i]+1)[:-1])
-        # coords.append(torch.linspace(0.0, max_value, spatial_shape[i]))
+        # coords.append(torch.linspace(0.0, max_value, spatial_shape[i]+1)[:-1])
+        coords.append(torch.linspace(0.0, max_value, spatial_shape[i]))
     # Tensor will have shape (*spatial_shape, len(spatial_shape))
     return torch.stack(torch.meshgrid(*coords, indexing="ij"), dim=-1)
 

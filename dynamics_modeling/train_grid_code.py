@@ -147,12 +147,12 @@ def main(cfg: DictConfig) -> None:
         multichannel = False
         tmp = torch.load(root_dir / "inr" / f"{load_run_name}.pt")
         latent_dim = tmp["cfg"].inr.latent_dim
-        try:
-            sub_from = tmp["cfg"].data.sub_from
-        except:
-            sub_from = 1
+        # try:
+        #     sub_from = tmp["cfg"].data.sub_from
+        # except:
+        #     sub_from = 1
 
-        sub_tr = tmp["cfg"].data.sub_tr
+        # sub_tr = tmp["cfg"].data.sub_tr
         seed = tmp["cfg"].data.seed
 
     elif load_run_dict is not None:
