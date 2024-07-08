@@ -15,7 +15,7 @@ import wandb
 from omegaconf import DictConfig, OmegaConf
 
 from coral.losses import batch_mse_rel_fn
-from coral.metalearning import outer_step
+from coral.metalearning import outer_step, outer_step_multiple_init
 from coral.mlp import MLP, Derivative, ResNet
 from coral.utils.data.dynamics_dataset import TemporalDatasetWithCode, rearrange
 from coral.utils.data.load_data import get_dynamics_data, set_seed, get_dynamics_data_two_grid
@@ -75,6 +75,7 @@ def main(cfg: DictConfig) -> None:
     inner_steps = cfg.optim.inner_steps
     test_inner_steps = cfg.optim.test_inner_steps
     epochs = cfg.optim.epochs
+    lr_grid = cfg.optim.lr_grid
 
     update_modulations=cfg.optim.update_modulations
     random_init=cfg.optim.random_init
@@ -82,6 +83,8 @@ def main(cfg: DictConfig) -> None:
     # inr
     model_type = cfg.inr.model_type
     latent_dim = cfg.inr.latent_dim
+
+    multi_init = 'multi_init' in model_type
 
     # wandb
     run_dir = (
@@ -94,7 +97,7 @@ def main(cfg: DictConfig) -> None:
     sweep_id = cfg.wandb.sweep_id
     device = torch.device("cuda")
     print("run dir given", run_dir)
-
+    os.environ["WANDB__SERVICE_WAIT"] = "300"
     run = wandb.init(
         entity=entity,
         project=project,
@@ -210,7 +213,7 @@ def main(cfg: DictConfig) -> None:
         num_workers=1,
     ) 
 
-    set_seed(seed)
+    # set_seed(seed)
     inr = create_inr_instance(
         cfg, input_dim=input_dim, output_dim=output_dim, device="cuda:0"
     )
@@ -223,14 +226,33 @@ def main(cfg: DictConfig) -> None:
     
     update_alpha = cfg.optim.update_alpha
     if update_alpha:
-        optimizer = torch.optim.AdamW(
-        [
-            {"params": inr.parameters(), "lr": lr_inr},
-            {"params": alpha, "lr": meta_lr_code, "weight_decay": weight_decay_lr_code},
-        ],
-        lr=lr_inr,
-        weight_decay=0,
-    )
+        if 'MoG' in model_type:
+            params_net = []
+            params_grid = []
+            for name, param in inr.named_parameters():
+                if 'grid_base' in name:
+                    params_grid.append(param)
+                else:
+                    params_net.append(param)
+
+            optimizer = torch.optim.AdamW(
+                [
+                    {"params": params_net, "lr": lr_inr},
+                    {"params": params_grid, "lr": lr_grid},
+                    {"params": alpha, "lr": meta_lr_code, "weight_decay": weight_decay_lr_code},
+                ],
+                lr=lr_inr,
+                weight_decay=0,
+                )
+        else:
+            optimizer = torch.optim.AdamW(
+            [
+                {"params": inr.parameters(), "lr": lr_inr},
+                {"params": alpha, "lr": meta_lr_code, "weight_decay": weight_decay_lr_code},
+            ],
+            lr=lr_inr,
+            weight_decay=0,
+        )
     else:
         # print('not optmize alpha')
         optimizer = torch.optim.AdamW(
@@ -273,6 +295,7 @@ def main(cfg: DictConfig) -> None:
 
     save_per_plot = True 
     plot = 'grid' in model_type
+    plot_origin = 'multi_init' in model_type
     visual_mod = cfg.inr.grid_size
     plot_frame = 40 
 
@@ -305,20 +328,36 @@ def main(cfg: DictConfig) -> None:
                 input_modulations = modulations
             # import pdb; pdb.set_trace()
             # print(input_modulations.mean())
-            outputs = outer_step(
-                inr,
-                coords,
-                images,
-                inner_steps,
-                alpha,
-                is_train=True,
-                return_reconstructions=False,
-                gradient_checkpointing=False,
-                use_rel_loss=use_rel_loss,
-                loss_type="mse",
-                # modulations=torch.zeros_like(modulations),
-                modulations=input_modulations,
-            )
+            if multi_init:
+                outputs = outer_step_multiple_init(
+                    inr,
+                    coords,
+                    images,
+                    inner_steps,
+                    alpha,
+                    is_train=True,
+                    return_reconstructions=False,
+                    gradient_checkpointing=False,
+                    use_rel_loss=use_rel_loss,
+                    loss_type="mse",
+                    # modulations=torch.zeros_like(modulations),
+                    modulations=input_modulations,
+                )
+            else:
+                outputs = outer_step(
+                    inr,
+                    coords,
+                    images,
+                    inner_steps,
+                    alpha,
+                    is_train=True,
+                    return_reconstructions=False,
+                    gradient_checkpointing=False,
+                    use_rel_loss=use_rel_loss,
+                    loss_type="mse",
+                    # modulations=torch.zeros_like(modulations),
+                    modulations=input_modulations,
+                )
 
             optimizer.zero_grad()
             outputs["loss"].backward(create_graph=False)
@@ -370,20 +409,36 @@ def main(cfg: DictConfig) -> None:
                     input_modulations = random_init_std * torch.randn_like(modulations)
                 else:
                     input_modulations = torch.zeros_like(modulations)
-                outputs = outer_step(
-                    inr,
-                    coords,
-                    images,
-                    test_inner_steps,
-                    alpha,
-                    is_train=False,
-                    return_reconstructions=False,
-                    gradient_checkpointing=False,
-                    use_rel_loss=use_rel_loss,
-                    loss_type="mse",
-                    # modulations=torch.zeros_like(modulations),
-                    modulations=input_modulations,
-                )
+                if multi_init:
+                    outputs = outer_step_multiple_init(
+                        inr,
+                        coords,
+                        images,
+                        test_inner_steps,
+                        alpha,
+                        is_train=False,
+                        return_reconstructions=False,
+                        gradient_checkpointing=False,
+                        use_rel_loss=use_rel_loss,
+                        loss_type="mse",
+                        # modulations=torch.zeros_like(modulations),
+                        modulations=input_modulations,
+                    )
+                else:
+                    outputs = outer_step(
+                        inr,
+                        coords,
+                        images,
+                        test_inner_steps,
+                        alpha,
+                        is_train=False,
+                        return_reconstructions=False,
+                        gradient_checkpointing=False,
+                        use_rel_loss=use_rel_loss,
+                        loss_type="mse",
+                        # modulations=torch.zeros_like(modulations),
+                        modulations=input_modulations,
+                    )
                 if plot and plot_modulations_num < plot_frame:
                     plot_modulations.append(outputs["modulations"][:plot_frame-plot_modulations_num])
                     plot_modulations_num += plot_modulations[-1].shape[0]
@@ -397,6 +452,12 @@ def main(cfg: DictConfig) -> None:
 
             if use_rel_loss:
                 rel_test_loss = rel_test_mse / ntest
+            
+            if plot_origin:
+                with torch.no_grad():
+                    origin = inr.latent_init.detach()
+                    origin_image = inr.modulated_forward(coords[0:origin.shape[0]], origin).detach().cpu().numpy()
+                    write_image(origin_image, origin_image, 0, path=os.path.join(run.dir, f'origin.png'), cmap='twilight_shifted', divider=1)
             
             plot_modulations_train_coords = []
             plot_modulations_num = 0
@@ -412,20 +473,36 @@ def main(cfg: DictConfig) -> None:
                     input_modulations = random_init_std * torch.randn_like(modulations)
                 else:
                     input_modulations = torch.zeros_like(modulations)
-                outputs = outer_step(
-                    inr,
-                    coords,
-                    images,
-                    test_inner_steps,
-                    alpha,
-                    is_train=False,
-                    return_reconstructions=False,
-                    gradient_checkpointing=False,
-                    use_rel_loss=use_rel_loss,
-                    loss_type="mse",
-                    # modulations=torch.zeros_like(modulations),
-                    modulations=input_modulations,
-                )
+                if multi_init:
+                    outputs = outer_step_multiple_init(
+                        inr,
+                        coords,
+                        images,
+                        test_inner_steps,
+                        alpha,
+                        is_train=False,
+                        return_reconstructions=False,
+                        gradient_checkpointing=False,
+                        use_rel_loss=use_rel_loss,
+                        loss_type="mse",
+                        # modulations=torch.zeros_like(modulations),
+                        modulations=input_modulations,
+                    )
+                else:
+                    outputs = outer_step(
+                        inr,
+                        coords,
+                        images,
+                        test_inner_steps,
+                        alpha,
+                        is_train=False,
+                        return_reconstructions=False,
+                        gradient_checkpointing=False,
+                        use_rel_loss=use_rel_loss,
+                        loss_type="mse",
+                        # modulations=torch.zeros_like(modulations),
+                        modulations=input_modulations,
+                    )
                 if plot and plot_modulations_num < plot_frame:
                     plot_modulations_train_coords.append(outputs["modulations"][:plot_frame-plot_modulations_num])
                     plot_modulations_num += plot_modulations_train_coords[-1].shape[0]

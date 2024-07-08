@@ -29,6 +29,8 @@ optim:
   n_steps: 1000
   lr_adapt: 0.01
   in_grid: False
+  decode_online: False
+  grid_ratio: 1.0 
 
 dynamics:
   model_type: fno

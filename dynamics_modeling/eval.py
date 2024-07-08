@@ -9,7 +9,7 @@ from visualize import write_image_pair, write_image
 
 def batch_eval_loop(model, inr, loader, timestamps, detailed_mse, 
                      n, multichannel, z_mean, z_std, dataset_name, 
-                     interpolation_seq, n_cond, visual_first=0, visual_path='', visual_mod=0):
+                     interpolation_seq, n_cond, code_dim=0, visual_first=0, visual_path='', visual_mod=0):
     interpolation_seq = interpolation_seq - n_cond
     visual=True
     if interpolation_seq:
@@ -61,8 +61,12 @@ def batch_eval_loop(model, inr, loader, timestamps, detailed_mse,
                 gt = get_reconstructions(
                     inr, coords, modulations, z_mean, z_std, dataset_name
                 )
+                origin = get_reconstructions(
+                    inr, coords, torch.zeros_like(modulations), torch.zeros_like(z_mean), torch.ones_like(z_std), dataset_name
+                )
                 if gt.dim() == 5:
                     gt_reshape = gt.permute(0,4,1,2,3).detach().cpu().numpy()
+                    origin_reshape = origin.permute(0,4,1,2,3).detach().cpu().numpy()
                     pred_reshape = pred.permute(0,4,1,2,3).detach().cpu().numpy()
                     images_reshape = images.permute(0,4,1,2,3).detach().cpu().numpy()
                     for visual_idx in range(visual_first):
@@ -70,15 +74,21 @@ def batch_eval_loop(model, inr, loader, timestamps, detailed_mse,
                         write_image_pair(images_reshape[visual_idx], pred_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}.png', cmap='twilight_shifted', divider=2)
                         error = np.abs(images_reshape[visual_idx] - pred_reshape[visual_idx])
                         write_image(error, error, 0, path=visual_path+f'error_{visual_idx}.png', cmap='twilight_shifted', divider=2)
-                        write_image_pair(images_reshape[visual_idx], gt_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}_gt.png', cmap='twilight_shifted', divider=2)
+                        write_image_pair(images_reshape[visual_idx], gt_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}_gtmod.png', cmap='twilight_shifted', divider=2)
+                        write_image_pair(images_reshape[visual_idx], origin_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}_origin.png', cmap='twilight_shifted', divider=2)
 
                 if visual_mod > 0:
                     modulations_v = modulations.permute(0,2,1)
-                    modulations_v = modulations_v.reshape(modulations_v.shape[0], modulations_v.shape[1], -1, visual_mod, visual_mod)
+                    modulations_v = modulations_v[...,code_dim:].reshape(modulations_v.shape[0], modulations_v.shape[1], -1, visual_mod, visual_mod)
                     divider = 2 * modulations_v.shape[2]
                     modulations_v = modulations_v.permute(0,2,1,3,4).reshape(modulations_v.shape[0], -1, visual_mod, visual_mod, 1).detach().cpu().numpy()
+                    modulations_v_pred = z_pred.permute(0,2,1)
+                    modulations_v_pred = modulations_v_pred[...,code_dim:].reshape(modulations_v_pred.shape[0], modulations_v_pred.shape[1], -1, visual_mod, visual_mod)
+                    modulations_v_pred = modulations_v_pred.permute(0,2,1,3,4).reshape(modulations_v_pred.shape[0], -1, visual_mod, visual_mod, 1).detach().cpu().numpy()
+                     
+                    
                     for visual_idx in range(visual_first):
-                        write_image(modulations_v[visual_idx], modulations_v[visual_idx], 0, path=visual_path+f'_{visual_idx}_mod.png', cmap='twilight_shifted', divider=divider)
+                        write_image_pair(modulations_v[visual_idx], modulations_v_pred[visual_idx], 0, path=visual_path+f'_{visual_idx}_mod.png', cmap='twilight_shifted', divider=divider)
 
 
                 visual=False 
@@ -130,13 +140,19 @@ def batch_eval_loop(model, inr, loader, timestamps, detailed_mse,
                         write_image_pair(images_reshape[visual_idx], pred_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}.png', cmap='twilight_shifted', divider=1)
                         write_image_pair(images_reshape[visual_idx], gt_reshape[visual_idx], 0, path=visual_path+f'_{visual_idx}_gt.png', cmap='twilight_shifted', divider=1)
                 if visual_mod > 0:
+
                     modulations_v = modulations.permute(0,2,1)
                     modulations_v = modulations_v.reshape(modulations_v.shape[0], modulations_v.shape[1], -1, visual_mod, visual_mod)
                     divider = 1 * modulations_v.shape[2]
                     modulations_v = modulations_v.permute(0,2,1,3,4).reshape(modulations_v.shape[0], -1, visual_mod, visual_mod, 1).detach().cpu().numpy()
+                    modulations_v_pred = z_pred.permute(0,2,1)
+                    modulations_v_pred = modulations_v_pred.reshape(modulations_v_pred.shape[0], modulations_v_pred.shape[1], -1, visual_mod, visual_mod)
+                    modulations_v_pred = modulations_v_pred.permute(0,2,1,3,4).reshape(modulations_v_pred.shape[0], -1, visual_mod, visual_mod, 1).detach().cpu().numpy()
+                     
                     for visual_idx in range(visual_first):
-                        write_image(modulations_v[visual_idx], modulations_v[visual_idx], 0, path=visual_path+f'_{visual_idx}_mod.png', cmap='twilight_shifted', divider=divider)
+                        write_image_pair(modulations_v[visual_idx], modulations_v_pred[visual_idx], 0, path=visual_path+f'_{visual_idx}_mod.png', cmap='twilight_shifted', divider=divider)
 
+                   
 
                 visual=False 
 

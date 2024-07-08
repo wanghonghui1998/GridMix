@@ -7,7 +7,7 @@ import torch.nn as nn
 
 from coral.fourier_features import ModulatedFourierFeatures
 from coral.mfn import FourierNet, HyperMultiscaleBACON
-from coral.siren import ModulatedSiren, ModulatedSSN, ModulatedSirenSCodeGrids, ModulatedSirenCodeShiftGridsScale, ModulatedSirenCodeGridsNorm, ModulatedSirenCodeLastGrids, ModulatedSirenCodeGrids, ModulatedSirenCA, ModulatedSirenIPC, ModulatedSirenIPCL, ModulatedSirenGrids, ModulatedSirenFields, ModulatedSirenFieldsChannel, ModulatedSirenGridsChannel, ModulatedSirenCode2FourierC, ModulatedSirenCodeFourierC, ModulatedSirenGridsFourier, ModulatedSirenGridsFourierC, ModulatedSirenOneGrids, ModulatedSirenOneGridsConv, ModulatedSirenLR, ModulatedSirenGridsZeroMean, ModulatedSirenGridsLR, ModulatedSirenGridsSet, ModulatedSirenGridsGlobal
+from coral.siren import ModulatedSirenMoW, ModulatedSirenMoGChannelMS, ModulatedSirenMoGCodeChannel, ModulatedSirenMoGChannelV2, ModulatedSiren, ModulatedSirenCodeMoG, ModulatedSirenMoGChannel, ModulatedSirenMoG, ModulatedSirenMultiInit,ModulatedSirenCodeGridsMSC,ModulatedSirenGridsSSGB, ModulatedSirenGridsMSGB,ModulatedSirenGridsMSC,ModulatedSirenGridsMS,ModulatedSirenCodeGridsMS,ModulatedSSN,ModulatedSirenCodeGridsFNO2L, ModulatedSirenGridsInit, ModulatedSirenCodeGridsFNO, ModulatedSirenSCodeGrids, ModulatedSirenCodeShiftGridsScale, ModulatedSirenCodeGridsNorm, ModulatedSirenCodeLastGrids, ModulatedSirenCodeGrids, ModulatedSirenCA, ModulatedSirenIPC, ModulatedSirenIPCL, ModulatedSirenGrids, ModulatedSirenFields, ModulatedSirenFieldsChannel, ModulatedSirenGridsChannel, ModulatedSirenCode2FourierC, ModulatedSirenCodeFourierC, ModulatedSirenGridsFourier, ModulatedSirenGridsFourierC, ModulatedSirenOneGrids, ModulatedSirenOneGridsConv, ModulatedSirenLR, ModulatedSirenGridsZeroMean, ModulatedSirenGridsLR, ModulatedSirenGridsSet, ModulatedSirenGridsGlobal
 
 NAME_TO_CLASS = {
     "siren": ModulatedSiren,
@@ -37,6 +37,97 @@ def create_inr_instance(cfg, input_dim=1, output_dim=1, device="cuda"):
             modulation_net_num_layers=cfg.inr.hypernet_depth,
             last_activation=cfg.inr.last_activation,
         ).to(device)
+
+    elif cfg.inr.model_type == "siren_MoW":
+        # print(cfg.inr.siren_init)
+        inr = ModulatedSirenMoW(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            k_mixture=cfg.inr.k_mixture,
+        ).to(device)
+    
+    elif cfg.inr.model_type == "siren_multi_init":
+        # print(cfg.inr.siren_init)
+        inr = ModulatedSirenMultiInit(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            num_init=cfg.inr.num_init,
+            scale_init=cfg.inr.scale_init,
+        ).to(device)
+
+    # elif cfg.inr.model_type == "siren_hash_enc":
+    #     # print(cfg.inr.siren_init)
+    #     inr = ModulatedSirenHashEnc(
+    #         dim_in=input_dim,
+    #         dim_hidden=cfg.inr.hidden_dim,
+    #         dim_out=output_dim,
+    #         num_layers=cfg.inr.depth,
+    #         w0=cfg.inr.w0,
+    #         w0_initial=cfg.inr.w0,
+    #         use_bias=True,
+    #         modulate_scale=cfg.inr.modulate_scale,
+    #         modulate_shift=cfg.inr.modulate_shift,
+    #         use_latent=cfg.inr.use_latent,
+    #         latent_dim=cfg.inr.latent_dim,
+    #         modulation_net_dim_hidden=cfg.inr.hypernet_width,
+    #         modulation_net_num_layers=cfg.inr.hypernet_depth,
+    #         last_activation=cfg.inr.last_activation,
+    #         n_levels=cfg.inr.n_levels,
+    #         n_features_per_level=cfg.inr.n_features_per_level,
+    #         log2_hashmap_size=cfg.inr.log2_hashmap_size,
+    #         base_resolution=cfg.inr.base_resolution,
+    #         per_level_scale=cfg.inr.per_level_scale,
+    #     ).to(device)
+
+    # elif cfg.inr.model_type == "nffb":
+    #     # print(cfg.inr.siren_init)
+    #     inr = ModulatedNFFB(
+    #         dim_in=input_dim,
+    #         dim_hidden=cfg.inr.hidden_dim,
+    #         dim_out=output_dim,
+    #         num_layers=cfg.inr.depth,
+    #         w0=cfg.inr.w0,
+    #         w0_initial=cfg.inr.w0,
+    #         use_bias=True,
+    #         modulate_scale=cfg.inr.modulate_scale,
+    #         modulate_shift=cfg.inr.modulate_shift,
+    #         use_latent=cfg.inr.use_latent,
+    #         latent_dim=cfg.inr.latent_dim,
+    #         modulation_net_dim_hidden=cfg.inr.hypernet_width,
+    #         modulation_net_num_layers=cfg.inr.hypernet_depth,
+    #         last_activation=cfg.inr.last_activation,
+    #         n_levels=cfg.inr.n_levels,
+    #         n_features_per_level=cfg.inr.n_features_per_level,
+    #         log2_hashmap_size=cfg.inr.log2_hashmap_size,
+    #         base_resolution=cfg.inr.base_resolution,
+    #         per_level_scale=cfg.inr.per_level_scale,
+    #         base_sigma=cfg.inr.base_sigma,
+    #         exp_sigma=cfg.inr.exp_sigma,
+    #     ).to(device)
 
     elif cfg.inr.model_type == "siren_ca":
         # print(cfg.inr.siren_init)
@@ -118,7 +209,128 @@ def create_inr_instance(cfg, input_dim=1, output_dim=1, device="cuda"):
             grid_size=cfg.inr.grid_size,
             siren_init=cfg.inr.siren_init,
         ).to(device)
+    elif cfg.inr.model_type == "siren_grid_ms":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenGridsMS(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+            num_scales=cfg.inr.num_scales
+        ).to(device)
 
+    elif cfg.inr.model_type == "siren_grid_msc":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenGridsMSC(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+            num_scales=cfg.inr.num_scales
+        ).to(device)
+    
+
+    elif cfg.inr.model_type == "siren_grid_ssgb":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenGridsSSGB(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+            num_scales=cfg.inr.num_scales,
+            gaussian_sigma=cfg.inr.gaussian_sigma,
+            gaussian_kernel_size=cfg.inr.gaussian_kernel_size,
+            gaussian_stride=cfg.inr.gaussian_stride,
+            gaussian_padding=cfg.inr.gaussian_padding,
+        ).to(device)
+
+    elif cfg.inr.model_type == "siren_grid_msgb":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenGridsMSGB(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+            num_scales=cfg.inr.num_scales,
+            gaussian_sigma=cfg.inr.gaussian_sigma,
+            gaussian_kernel_size=cfg.inr.gaussian_kernel_size,
+            gaussian_stride=cfg.inr.gaussian_stride,
+            gaussian_padding=cfg.inr.gaussian_padding,
+        ).to(device)
+
+    elif cfg.inr.model_type == "siren_grid_init":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenGridsInit(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+        ).to(device)
     elif cfg.inr.model_type == "siren_field":
         print(cfg.inr.siren_init)
         inr = ModulatedSirenFields(
@@ -232,6 +444,249 @@ def create_inr_instance(cfg, input_dim=1, output_dim=1, device="cuda"):
     elif cfg.inr.model_type == "siren_code_grid":
         print(cfg.inr.siren_init)
         inr = ModulatedSirenCodeGrids(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+        ).to(device)
+    
+    elif cfg.inr.model_type == "siren_MoG":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenMoG(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+            grid_base=cfg.inr.grid_base,
+            grid_sum=cfg.inr.grid_sum,
+            share_grid=cfg.inr.share_grid
+        ).to(device)
+
+    elif cfg.inr.model_type == "siren_code_MoG":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenCodeMoG(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+            grid_base=cfg.inr.grid_base,
+            grid_sum=cfg.inr.grid_sum,
+            share_grid=cfg.inr.share_grid,
+            share_code=cfg.inr.share_code,
+        ).to(device)
+    
+    elif cfg.inr.model_type == "siren_MoG_chan":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenMoGChannel(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+            grid_base=cfg.inr.grid_base,
+            grid_sum=cfg.inr.grid_sum,
+            share_grid=cfg.inr.share_grid
+        ).to(device)
+
+    elif cfg.inr.model_type == "siren_MoG_chan_MS":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenMoGChannelMS(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+            grid_base=cfg.inr.grid_base,
+            grid_sum=cfg.inr.grid_sum,
+            share_grid=cfg.inr.share_grid,
+            grid_scale_ratio=cfg.inr.grid_scale_ratio,
+        ).to(device)
+
+    elif cfg.inr.model_type == "siren_MoGCode_chan":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenMoGCodeChannel(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+            grid_base=cfg.inr.grid_base,
+            grid_sum=cfg.inr.grid_sum,
+            share_grid=cfg.inr.share_grid
+        ).to(device)
+
+    elif cfg.inr.model_type == "siren_MoG_chan_v2":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenMoGChannelV2(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+            grid_base=cfg.inr.grid_base,
+            grid_sum=cfg.inr.grid_sum,
+            share_grid=cfg.inr.share_grid,
+            grid_init_channel=cfg.inr.grid_init_channel,
+        ).to(device)
+    
+    elif cfg.inr.model_type == "siren_code_grid_ms":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenCodeGridsMS(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+            num_scales=cfg.inr.num_scales
+        ).to(device)
+
+    elif cfg.inr.model_type == "siren_code_grid_msc":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenCodeGridsMSC(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+            num_scales=cfg.inr.num_scales
+        ).to(device)
+    
+    elif cfg.inr.model_type == "siren_code_grid_fno":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenCodeGridsFNO(
+            dim_in=input_dim,
+            dim_hidden=cfg.inr.hidden_dim,
+            dim_out=output_dim,
+            num_layers=cfg.inr.depth,
+            w0=cfg.inr.w0,
+            w0_initial=cfg.inr.w0,
+            use_bias=True,
+            modulate_scale=cfg.inr.modulate_scale,
+            modulate_shift=cfg.inr.modulate_shift,
+            use_latent=cfg.inr.use_latent,
+            latent_dim=cfg.inr.latent_dim,
+            modulation_net_dim_hidden=cfg.inr.hypernet_width,
+            modulation_net_num_layers=cfg.inr.hypernet_depth,
+            last_activation=cfg.inr.last_activation,
+            use_norm=cfg.inr.use_norm,
+            grid_size=cfg.inr.grid_size,
+            siren_init=cfg.inr.siren_init,
+        ).to(device)
+
+    elif cfg.inr.model_type == "siren_code_grid_fno2l":
+        print(cfg.inr.siren_init)
+        inr = ModulatedSirenCodeGridsFNO2L(
             dim_in=input_dim,
             dim_hidden=cfg.inr.hidden_dim,
             dim_out=output_dim,
@@ -624,6 +1079,29 @@ def load_inr_model(
     alpha = inr_train["alpha"]
     print(f'{run_name}, epoch {inr_train["epoch"]}, alpha1 {alpha.item()}')
     inr = create_inr_instance(cfg, input_dim, output_dim, device)
+    # inr.load_state_dict(inr_state_dict)
+    new_state_dict = {}
+    for name, para in inr_state_dict.items():
+        if 'module.' in name:
+            new_state_dict[name[7:]] = para 
+        else:
+            new_state_dict[name] = para 
+    inr.load_state_dict(new_state_dict)
+    inr.eval()
+
+    return inr, alpha
+
+def load_inr_model_sep_lr(
+    run_dir, run_name, data_to_encode, input_dim=1, output_dim=1, device="cuda"
+):  
+    inr_train = torch.load(run_dir / f"{run_name}.pt")
+
+    inr_state_dict = inr_train["inr"]
+    cfg = inr_train["cfg"]
+    alpha = inr_train["alpha"]
+    alpha_grid = inr_train["alpha_grid"]
+    print(f'{run_name}, epoch {inr_train["epoch"]}, alpha {alpha.item()}, alpha_grid {alpha_grid.item()}')
+    inr = create_inr_instance(cfg, input_dim, output_dim, device)
     inr.load_state_dict(inr_state_dict)
     # new_state_dict = {}
     # for name, para in inr_state_dict.items():
@@ -635,7 +1113,7 @@ def load_inr_model(
     # inr.load_state_dict(new_state_dict)
     inr.eval()
 
-    return inr, alpha
+    return inr, alpha, alpha_grid
 
 def load_inr_model_dino(
     run_dir, run_name, data_to_encode, input_dim=1, output_dim=1, device="cuda"

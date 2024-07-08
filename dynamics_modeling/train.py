@@ -5,7 +5,7 @@ from coral.utils.models.get_inr_reconstructions import get_reconstructions
 from coral.utils.data.load_modulations import load_dynamics_modulations
 from coral.utils.data.load_data import get_dynamics_data, set_seed
 from coral.utils.data.dynamics_dataset import (KEY_TO_INDEX, TemporalDatasetWithCode)
-from coral.mlp import Derivative
+from coral.mlp import Derivative, DerivativeFNO1d
 from torchdiffeq import odeint
 from omegaconf import DictConfig, OmegaConf
 import math
@@ -109,7 +109,7 @@ def main(cfg: DictConfig) -> None:
     )
 
     print("run dir given", run_dir)
-
+    os.environ["WANDB__SERVICE_WAIT"] = "300"
     run = wandb.init(
         entity=entity,
         project=project,
@@ -144,14 +144,16 @@ def main(cfg: DictConfig) -> None:
     # we need the latent dim and the sub_tr used for training
     if load_run_name is not None:
         multichannel = False
+        print(root_dir / "inr" / f"{load_run_name}.pt")
         tmp = torch.load(root_dir / "inr" / f"{load_run_name}.pt")
+        
         latent_dim = tmp["cfg"].inr.latent_dim
-        try:
-            sub_from = tmp["cfg"].data.sub_from
-        except:
-            sub_from = 1
+        # try:
+        #     sub_from = tmp["cfg"].data.sub_from
+        # except:
+        #     sub_from = 1
 
-        sub_tr = tmp["cfg"].data.sub_tr
+        # sub_tr = tmp["cfg"].data.sub_tr
         seed = tmp["cfg"].data.seed
 
     elif load_run_dict is not None:
@@ -169,7 +171,7 @@ def main(cfg: DictConfig) -> None:
             sub_from = 1
 
     set_seed(seed)
-
+    print(seed)
     (u_train, u_train_eval, u_test, grid_tr, grid_tr_extra, grid_te) = get_dynamics_data(
         data_dir,
         dataset_name,
@@ -338,21 +340,24 @@ def main(cfg: DictConfig) -> None:
     )
     train_extra_loader = torch.utils.data.DataLoader(
         trainset_extra,
-        batch_size=batch_size//2,
+        batch_size=batch_size//8,
         shuffle=False,
         num_workers=1,
         pin_memory=True,
     )
     test_loader = torch.utils.data.DataLoader(
         testset,
-        batch_size=batch_size_val//2,
+        batch_size=batch_size_val//8,
         shuffle=False,
         num_workers=1,
     )
 
     c = z_train.shape[2] if multichannel else 1 
-    model = Derivative(c, z_train.shape[1], hidden, depth).cuda()
-
+    if model_type == 'ode':
+        model = Derivative(c, z_train.shape[1], hidden, depth).cuda()
+    elif model_type == 'fno1d':
+        model = DerivativeFNO1d().cuda()
+    print(model)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=lr, weight_decay=weight_decay)
     
@@ -456,19 +461,19 @@ def main(cfg: DictConfig) -> None:
             code_train_mse += loss.item() * n_samples
 
             if True in (step_show, step_show_last):
-                pred = get_reconstructions(
-                    inr, coords, z_pred, z_mean, z_std, dataset_name
-                )
-                # pred = []
-                # pred_batch_size = 32
-                # for test_id in range(math.ceil(1.0*z_pred.shape[0]/pred_batch_size)):
-                #     pred_id = get_reconstructions(
-                #         inr, coords[test_id*pred_batch_size:(test_id+1)*pred_batch_size], z_pred[test_id*pred_batch_size:(test_id+1)*pred_batch_size], z_mean, z_std, dataset_name
-                #     )
-                #     pred.append(pred_id)
-                #     del pred_id
-                # pred = torch.cat(pred, dim=0)
-                # pred_train_mse += ((pred - images) ** 2).mean() * n_samples
+                # pred = get_reconstructions(
+                #     inr, coords, z_pred, z_mean, z_std, dataset_name
+                # )
+                pred = []
+                pred_batch_size = 16
+                for test_id in range(math.ceil(1.0*z_pred.shape[0]/pred_batch_size)):
+                    pred_id = get_reconstructions(
+                        inr, coords[test_id*pred_batch_size:(test_id+1)*pred_batch_size], z_pred[test_id*pred_batch_size:(test_id+1)*pred_batch_size], z_mean, z_std, dataset_name
+                    )
+                    pred.append(pred_id)
+                    del pred_id
+                pred = torch.cat(pred, dim=0)
+                pred_train_mse += ((pred - images) ** 2).mean() * n_samples
                 
                 if multichannel:
                     detailed_train_mse.aggregate(pred, images)
@@ -480,7 +485,7 @@ def main(cfg: DictConfig) -> None:
 
         scheduler.step(code_train_mse)
 
-        if T_train != T_test:
+        if True in (step_show, step_show_last) and T_train != T_test:
             pred_train_inter_mse, code_train_inter_mse, pred_train_extra_mse, code_train_extra_mse, total_pred_train_mse, detailed_train_eval_mse = batch_eval_loop(
                 model, inr, train_extra_loader,
                 timestamps_test, detailed_train_eval_mse,

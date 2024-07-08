@@ -37,10 +37,10 @@ inner_steps=3
 
 saved_checkpoint=True
 evaluate=True 
-checkpoint_path='/cluster/home1/whh/workspace/wandb/navier-stokes-nms-f40-64-wonorm/model/dyn_wf_r3_first40_T64-wonorm_ck.pt'
+checkpoint_path='/cluster/home3/whh/workspace/pinn/exp_nvme4a/wandb/navier-stokes-nms-f40-64-wonorm/model/dyn_wf_r3_first40_T64-wonorm_ck.pt'
 
 #run_name="toasty-darkness-5007"  #"desert-sponge-4958" # "eager-field-4969" # splendid-yogurt-4959 # "desert-sponge-4958" # misunderstood-sunset-4916
 run_name='wf_r3_first40_T64-wonorm2' 
-name='dyn_wf_r3_first40_T64_evaluate_ck-wonorm'
-id='dyn_S256_wf_r3_first40_T64_evaluate_ck-wonorm'
+name='eval_plot_origin_dyn_wf_r3_first40_T64_evaluate_ck-wonorm'
+id='eval_plot_origin_dyn_S256_wf_r3_first40_T64_evaluate_ck-wonorm'
 python3 dynamics_modeling/train.py "data.dir=$dir" "data.sub_from=$sub_from" "data.same_grid=$same_grid" "data.dataset_name=$dataset_name" "dynamics.width=$width" "dynamics.depth=$depth" "data.sub_tr=$sub_tr" "data.sub_te=$sub_te" "optim.epochs=$epochs" "data.seq_inter_len=$seq_inter_len" "data.seq_extra_len=$seq_extra_len" "optim.batch_size=$batch_size" "optim.lr=$lr"  "dynamics.teacher_forcing_update=$teacher_forcing_update" "inr.run_name=$run_name" "wandb.name=$name" "wandb.id=$id" "wandb.saved_checkpoint=$saved_checkpoint" "wandb.checkpoint_path=$checkpoint_path" "wandb.evaluate=$evaluate"

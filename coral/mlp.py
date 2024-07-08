@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import einops
 import numpy as np 
-
+from coral.fno_models import FNO1d
 class Swish(nn.Module):
     def __init__(self):
         super().__init__()
@@ -221,6 +221,7 @@ class Derivative(nn.Module):
 
     def forward(self, t, u):
         return self.net(u)
+
 
 class Derivative2nd(nn.Module):
     def __init__(self, state_c, code_c, hidden_c, depth=2, **kwargs):
@@ -619,3 +620,17 @@ class DerivativeCodeGrid(nn.Module):
         grad_code = self.net_code(code)
 
         return torch.cat([grad_code, grad_grid.permute(0,3,1,2).reshape(u.shape[0], -1)], dim=-1)
+
+
+
+
+
+
+class DerivativeFNO1d(nn.Module):
+    def __init__(self, modes=12, **kwargs):
+        super().__init__()
+        modes = [modes] * 4
+        self.net = FNO1d(modes=modes, in_dim=1, out_dim=1, act="gelu")
+
+    def forward(self, t, u):
+        return self.net(u.unsqueeze(-1)).squeeze(-1)

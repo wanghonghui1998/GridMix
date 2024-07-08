@@ -3,9 +3,10 @@ from coral.utils.models.scheduling import ode_scheduling
 from coral.utils.models.load_inr import create_inr_instance, load_inr_model
 from coral.utils.models.get_inr_reconstructions import get_reconstructions
 from coral.utils.data.load_modulations import load_dynamics_modulations
-from coral.utils.data.load_data import get_dynamics_data, set_seed
+from coral.utils.data.load_data import get_dynamics_data, set_seed, get_dynamics_data_two_grid
 from coral.utils.data.dynamics_dataset import (KEY_TO_INDEX, TemporalDatasetWithCode)
 from coral.mlp import DerivativeFNO, Derivative
+from coral.metalearning import outer_step_metagrid, outer_step, outer_step_metagrid_same_coords, outer_step_metagrid_part_coords, outer_step_metagrid_twoview, outer_step_metagrid_twoview_rand, outer_step_test_on_diff_grid
 from torchdiffeq import odeint
 from omegaconf import DictConfig, OmegaConf
 import wandb
@@ -78,6 +79,8 @@ def main(cfg: DictConfig) -> None:
     gamma_step = cfg.optim.gamma_step
     epochs = cfg.optim.epochs
     in_grid = cfg.optim.in_grid
+    decode_online = cfg.optim.decode_online
+    grid_ratio = cfg.optim.grid_ratio
 
     # inr
     load_run_name = cfg.inr.run_name
@@ -148,12 +151,12 @@ def main(cfg: DictConfig) -> None:
         multichannel = False
         tmp = torch.load(root_dir / "inr" / f"{load_run_name}.pt")
         latent_dim = tmp["cfg"].inr.latent_dim
-        try:
-            sub_from = tmp["cfg"].data.sub_from
-        except:
-            sub_from = 1
+        # try:
+        #     sub_from = tmp["cfg"].data.sub_from
+        # except:
+        #     sub_from = 1
 
-        sub_tr = tmp["cfg"].data.sub_tr
+        # sub_tr = tmp["cfg"].data.sub_tr
         seed = tmp["cfg"].data.seed
 
     elif load_run_dict is not None:
@@ -280,6 +283,23 @@ def main(cfg: DictConfig) -> None:
         z_train_extra_in = modulations_in["z_train_extra"]
         z_test_in = modulations_in["z_test"]
         # import pdb; pdb.set_trace()
+        
+        z_train_extra_in_reshape = einops.rearrange(z_train_extra_in, "b l t -> (b t) l")
+        z_test_in_reshape = einops.rearrange(z_test_in, "b l t -> (b t) l")
+        z_train_extra_reshape = einops.rearrange(z_train_extra, "b l t -> (b t) l")
+        z_test_reshape = einops.rearrange(z_test, "b l t -> (b t) l")
+        # code_train_extra_error = torch.linalg.norm(z_train_extra_in_reshape[...,:128]-z_train_extra_reshape[...,:128], 2, dim=-1) / torch.linalg.norm(z_train_extra_in_reshape[...,:128], 2, dim=-1)
+        # grid_train_extra_error = torch.linalg.norm(z_train_extra_in_reshape[...,128:]-z_train_extra_reshape[...,128:], 2, dim=-1) / torch.linalg.norm(z_train_extra_in_reshape[...,128:], 2, dim=-1)
+        # code_test_error = torch.linalg.norm(z_test_in_reshape[...,:128]-z_test_reshape[...,:128], 2, dim=-1) / torch.linalg.norm(z_test_in_reshape[...,:128], 2, dim=-1)
+        # grid_test_error = torch.linalg.norm(z_test_in_reshape[...,128:]-z_test_reshape[...,128:], 2, dim=-1) / torch.linalg.norm(z_test_in_reshape[...,128:], 2, dim=-1)
+        
+        code_train_extra_error = torch.tensor([0.0])
+        grid_train_extra_error = torch.linalg.norm(z_train_extra_in_reshape[...,:]-z_train_extra_reshape[...,:], 2, dim=-1) / torch.linalg.norm(z_train_extra_in_reshape[...,:], 2, dim=-1)
+        code_test_error = torch.tensor([0.0])
+        grid_test_error = torch.linalg.norm(z_test_in_reshape[...,:]-z_test_reshape[...,:], 2, dim=-1) / torch.linalg.norm(z_test_in_reshape[...,:], 2, dim=-1)
+        
+        print(f'code_train_extra_error {code_train_extra_error.mean()}, grid_train_extra_error {grid_train_extra_error.mean()}, code_test_error {code_test_error.mean()}, grid_test_error {grid_test_error.mean()}')
+        
         if cfg.dynamics.normalize_per_ele:
 
             z_mean = einops.rearrange(z_train, "b l t -> (b t) l").mean(0).reshape(1, latent_dim, 1)
@@ -379,7 +399,8 @@ def main(cfg: DictConfig) -> None:
     testset.z = z_test
     trainset_extra_in.z = z_train_extra_in
     testset_in.z = z_test_in
-
+    z_mean_cuda = z_mean.cuda()
+    z_std_cuda = z_std.cuda()
     print('ztrain', z_train.shape, z_train.mean(), z_train.std())
     print('ztrain_extra', z_train_extra.shape, z_train_extra.mean(), z_train_extra.std())
     print('ztest', z_test.shape, z_test.mean(), z_test.std())
@@ -431,7 +452,7 @@ def main(cfg: DictConfig) -> None:
         model = DerivativeFNO(modes, modes, width, grid_channel, grid_size).cuda()
     else:
         raise NotImplementedError
-
+    print(model)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=lr, weight_decay=weight_decay)
     
@@ -491,14 +512,14 @@ def main(cfg: DictConfig) -> None:
                     model, inr, train_extra_loader,
                     timestamps_test, detailed_train_eval_mse,
                     ntrain, multichannel, z_mean, z_std,
-                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'train_{epoch_start}'), visual_mod=grid_size
+                    dataset_name, T_train, n_cond, code_dim=128, visual_first=4, visual_path=os.path.join(run.dir, f'train_{epoch_start}'), visual_mod=grid_size
                 )
 
         pred_test_inter_mse, code_test_inter_mse, pred_test_extra_mse, code_test_extra_mse, pred_test_mse, detailed_test_mse = batch_eval_loop(
                     model, inr, test_loader,
                     timestamps_test, detailed_test_mse,
                     ntest, multichannel, z_mean, z_std,
-                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'test_{epoch_start}'), visual_mod=grid_size
+                    dataset_name, T_train, n_cond, code_dim=128, visual_first=4, visual_path=os.path.join(run.dir, f'test_{epoch_start}'), visual_mod=grid_size
                 )
         print(f'train inter mse {pred_train_inter_mse}, train_extra_mse {pred_train_extra_mse}, test inter mse {pred_test_inter_mse}, test extra mse {pred_test_extra_mse}')
         return 
@@ -513,15 +534,38 @@ def main(cfg: DictConfig) -> None:
         pred_train_mse = 0
         code_train_mse = 0
 
-        for substep, (images, modulations, coords, idx) in enumerate(train_loader):
+        for substep, (images, raw_modulations, coords, idx) in enumerate(train_loader):
             model.train()
             images = images.cuda()
-            modulations = modulations.cuda()
+            raw_modulations = raw_modulations.cuda()
             coords = coords.cuda()
             n_samples = images.shape[0]
 
             if multichannel:
-                modulations = einops.rearrange(modulations, "b l c t -> b (l c) t")
+                raw_modulations = einops.rearrange(raw_modulations, "b l c t -> b (l c) t")
+
+            if decode_online:
+                outputs = outer_step_metagrid_same_coords(
+                    inr,
+                    einops.rearrange(coords, 'b ... t -> (b t) ...'),
+                    einops.rearrange(images, 'b ... t -> (b t) ...'),
+                    inner_steps,
+                    alpha,
+                    grid_ratio,
+                    is_train=False,
+                    return_reconstructions=False,
+                    gradient_checkpointing=False,
+                    use_rel_loss=False,
+                    loss_type="mse",
+                    modulations=torch.zeros_like(einops.rearrange(raw_modulations, 'b ... t -> (b t) ...')),
+                    # modulations=input_modulations,
+                )
+                # import pdb; pdb.set_trace()
+                modulations = outputs["modulations"]
+                modulations = einops.rearrange(modulations, "(b t) ... -> b ... t", t=images.shape[-1])
+                modulations = (modulations - z_mean_cuda) / z_std_cuda
+            else:
+                modulations = raw_modulations
 
             modulations = modulations[...,n_cond:]
             images = images[...,n_cond:]
@@ -552,18 +596,19 @@ def main(cfg: DictConfig) -> None:
         scheduler.step(code_train_mse)
 
         if T_train != T_test:
+            visual_first=1 if True in (step_show, step_show_last) else 0
             pred_train_inter_mse, code_train_inter_mse, pred_train_extra_mse, code_train_extra_mse, total_pred_train_mse, detailed_train_eval_mse = batch_eval_loop(
                 model, inr, train_extra_loader,
                 timestamps_test, detailed_train_eval_mse,
                 ntrain, multichannel, z_mean, z_std,
-                dataset_name, T_train, n_cond
+                dataset_name, T_train, n_cond, visual_first=visual_first, visual_path=os.path.join(run.dir, f'tr_{step}'), visual_mod=grid_size
             )
 
             pred_train_inter_mse_in, code_train_inter_mse_in, pred_train_extra_mse_in, code_train_extra_mse_in, total_pred_train_mse_in, detailed_train_eval_mse = batch_eval_loop(
                 model, inr, train_extra_loader_in,
                 timestamps_test, detailed_train_eval_mse,
                 ntrain, multichannel, z_mean, z_std,
-                dataset_name, T_train, n_cond
+                dataset_name, T_train, n_cond, visual_first=visual_first, visual_path=os.path.join(run.dir, f'tr_in_{step}'), visual_mod=grid_size
             )
 
         if True in (step_show, step_show_last):
@@ -572,19 +617,19 @@ def main(cfg: DictConfig) -> None:
                     model, inr, test_loader,
                     timestamps_test, detailed_test_mse,
                     ntest, multichannel, z_mean, z_std,
-                    dataset_name, T_train,n_cond
+                    dataset_name, T_train,n_cond, visual_first=1, visual_path=os.path.join(run.dir, f'te_{step}'), visual_mod=grid_size
                 )
 
                 pred_test_inter_mse_in, code_test_inter_mse_in, pred_test_extra_mse_in, code_test_extra_mse_in, pred_test_mse_in, detailed_test_mse = batch_eval_loop(
                     model, inr, test_loader_in,
                     timestamps_test, detailed_test_mse,
                     ntest, multichannel, z_mean, z_std,
-                    dataset_name, T_train,n_cond
+                    dataset_name, T_train,n_cond, visual_first=1, visual_path=os.path.join(run.dir, f'te_in_{step}'), visual_mod=grid_size
                 )
-                print(f'{step} code_train_inter_mse {code_train_inter_mse:2.e}, code_train_extra_mse {code_train_extra_mse:2.e}, pred_train_inter_mse {pred_train_inter_mse:2.e}, pred_train_extra_mse {pred_train_extra_mse:2.e}')
-                print(f'{step} code_train_inter_mse_in {code_train_inter_mse_in:2.e}, code_train_extra_mse_in {code_train_extra_mse_in:2.e}, pred_train_inter_mse_in {pred_train_inter_mse_in:2.e}, pred_train_extra_mse_in {pred_train_extra_mse_in:2.e}')
-                print(f'{step} code_test_inter_mse {code_test_inter_mse:2.e}, code_test_extra_mse {code_test_extra_mse:2.e}, pred_test_inter_mse {pred_test_inter_mse:2.e}, pred_test_extra_mse {pred_test_extra_mse:2.e}')
-                print(f'{step} code_test_inter_mse_in {code_test_inter_mse_in:2.e}, code_test_extra_mse_in {code_test_extra_mse_in:2.e}, pred_test_inter_mse_in {pred_test_inter_mse_in:2.e}, pred_test_extra_mse_in {pred_test_extra_mse_in:2.e}')
+                print(f'{step} code_train_inter_mse {code_train_inter_mse:.2e}, code_train_extra_mse {code_train_extra_mse:.2e}, pred_train_inter_mse {pred_train_inter_mse:.2e}, pred_train_extra_mse {pred_train_extra_mse:.2e}')
+                print(f'{step} code_train_inter_mse_in {code_train_inter_mse_in:.2e}, code_train_extra_mse_in {code_train_extra_mse_in:.2e}, pred_train_inter_mse_in {pred_train_inter_mse_in:.2e}, pred_train_extra_mse_in {pred_train_extra_mse_in:.2e}')
+                print(f'{step} code_test_inter_mse {code_test_inter_mse:.2e}, code_test_extra_mse {code_test_extra_mse:.2e}, pred_test_inter_mse {pred_test_inter_mse:.2e}, pred_test_extra_mse {pred_test_extra_mse:.2e}')
+                print(f'{step} code_test_inter_mse_in {code_test_inter_mse_in:.2e}, code_test_extra_mse_in {code_test_extra_mse_in:.2e}, pred_test_inter_mse_in {pred_test_inter_mse_in:.2e}, pred_test_extra_mse_in {pred_test_extra_mse_in:.2e}')
                 
                 log_dic = {
                     "pred_train_inter_mse": pred_train_inter_mse,

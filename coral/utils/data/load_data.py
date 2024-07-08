@@ -1766,8 +1766,8 @@ def get_navier_stokes_dino(filename, seq_inter_len=20, seq_extra_len=20):
     # train_path = str(filename) + "/dino/navier_1e-3_256_2_train.shelve"
     # test_path = str(filename) + "/dino/navier_1e-3_256_2_test.shelve"
 
-    train_path = str(filename) + '/navier_stokes/navier_1e-3_first30_train.shelve'
-    test_path = str(filename) + '/navier_stokes/navier_1e-3_first30_test.shelve'
+    train_path = str(filename) + '/navier_stokes_dino_v0/navier_1e-3_256_train.shelve'
+    test_path = str(filename) + '/navier_stokes_dino_v0/navier_1e-3_256_test.shelve'
 
     data_train = dict(shelve.open(str(train_path)))
     data_test = dict(shelve.open(str(test_path)))
@@ -1800,9 +1800,9 @@ def get_navier_stokes_dino(filename, seq_inter_len=20, seq_extra_len=20):
         )
     )
 
-    u_min = u_train.min()
-    u_max = u_train.max()
-    print(u_min, u_max, u_test.min(), u_test.max())
+    # u_min = u_train.min()
+    # u_max = u_train.max()
+    # print(u_min, u_max, u_test.min(), u_test.max())
 
     # if sequence_length is not None:
     #     u_train = einops.rearrange(

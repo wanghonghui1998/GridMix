@@ -5,8 +5,8 @@ import einops
 import torch
 from torch.utils.data import DataLoader
 from torch_geometric.loader import DataLoader as GeometricLoader
-from coral.metalearning import outer_step, graph_outer_step, outer_step_dino
-
+from coral.metalearning import outer_step_metagrid_same_coords_sep_lr_two_stage, outer_step_metagrid_same_coords_sep_lr, outer_step, graph_outer_step, outer_step_dino, outer_step_boosting
+from coral.utils.data.load_data import shape2coordinates
 
 def load_operator_modulations(
     trainset,
@@ -186,6 +186,8 @@ def load_operator_modulations(
 
 def eval_modulation_loop(loader, inr, inner_steps, alpha, z, T):
     fit_mse = 0
+    # regular_grid = shape2coordinates([64,64])
+    # regular_grid = regular_grid.reshape(1, 64*64, 2).cuda()
     for substep, (batch_v, batch_z, batch_coord, idx) in enumerate(loader):
         batch_v = batch_v.cuda()
         batch_z = batch_z.cuda()
@@ -213,6 +215,21 @@ def eval_modulation_loop(loader, inr, inner_steps, alpha, z, T):
             loss_type="mse",
             modulations=torch.zeros_like(batch_z),
         )
+        # outputs = outer_step_boosting(
+        #     inr,
+        #     regular_grid.repeat(batch_coord.shape[0], 1, 1),
+        #     batch_coord,
+        #     batch_v,
+        #     inner_steps,
+        #     alpha,
+        #     is_train=False,
+        #     return_reconstructions=True,
+        #     gradient_checkpointing=False,
+        #     use_rel_loss=False,
+        #     loss_type="mse",
+        #     # modulations=torch.zeros_like(modulations),
+        #     modulations=torch.zeros_like(batch_z),
+        # )
         tmp_mod = outputs["modulations"].cpu().detach()
         tmp_mod = einops.rearrange(tmp_mod, "(b t) ... -> b ... t", t=T)
         z[idx] = tmp_mod
@@ -220,6 +237,161 @@ def eval_modulation_loop(loader, inr, inner_steps, alpha, z, T):
         fit_mse += loss.item() * n_samples
     return z, fit_mse
 
+def eval_modulation_loop_sep_lr(loader, inr, inner_steps, alpha, alpha_grid, z, T, code_dim, two_stage=False):
+    fit_mse = 0
+    # regular_grid = shape2coordinates([64,64])
+    # regular_grid = regular_grid.reshape(1, 64*64, 2).cuda()
+    for substep, (batch_v, batch_z, batch_coord, idx) in enumerate(loader):
+        batch_v = batch_v.cuda()
+        batch_z = batch_z.cuda()
+        batch_coord = batch_coord.cuda()
+        n_samples = batch_v.shape[0]
+
+        if batch_coord.shape[-2] == 2:
+            batch_v = einops.rearrange(batch_v, 'b ... t -> (b t) ...')#.unsqueeze(-1)
+        else:
+            batch_v = einops.rearrange(batch_v, 'b ... t -> (b t) ...').unsqueeze(-1)
+
+        batch_z = einops.rearrange(batch_z, 'b ... t -> (b t) ...')
+        batch_coord = einops.rearrange(batch_coord, 'b ... t -> (b t) ...')
+
+        # outputs = outer_step(
+        #     inr,
+        #     batch_coord,
+        #     batch_v,
+        #     inner_steps,
+        #     alpha,
+        #     is_train=False,
+        #     return_reconstructions=True,
+        #     gradient_checkpointing=False,
+        #     use_rel_loss=False,
+        #     loss_type="mse",
+        #     modulations=torch.zeros_like(batch_z),
+        # )
+        if not two_stage:
+            outputs = outer_step_metagrid_same_coords_sep_lr(
+                inr,
+                batch_coord,
+                batch_v,
+                inner_steps,
+                alpha,
+                alpha_grid,
+                grid_ratio=1.0,
+                is_train=False,
+                return_reconstructions=True,
+                gradient_checkpointing=False,
+                use_rel_loss=False,
+                loss_type="mse",
+                modulations=torch.zeros_like(batch_z),
+                code_dim=code_dim,
+            )
+        else:
+            outputs = outer_step_metagrid_same_coords_sep_lr_two_stage(
+                inr,
+                batch_coord,
+                batch_v,
+                inner_steps,
+                alpha,
+                alpha_grid,
+                grid_ratio=1.0,
+                is_train=False,
+                return_reconstructions=True,
+                gradient_checkpointing=False,
+                use_rel_loss=False,
+                loss_type="mse",
+                modulations=torch.zeros_like(batch_z),
+                code_dim=code_dim,
+            )
+        # outputs = outer_step_boosting(
+        #     inr,
+        #     regular_grid.repeat(batch_coord.shape[0], 1, 1),
+        #     batch_coord,
+        #     batch_v,
+        #     inner_steps,
+        #     alpha,
+        #     is_train=False,
+        #     return_reconstructions=True,
+        #     gradient_checkpointing=False,
+        #     use_rel_loss=False,
+        #     loss_type="mse",
+        #     # modulations=torch.zeros_like(modulations),
+        #     modulations=torch.zeros_like(batch_z),
+        # )
+        tmp_mod = outputs["modulations"].cpu().detach()
+        tmp_mod = einops.rearrange(tmp_mod, "(b t) ... -> b ... t", t=T)
+        z[idx] = tmp_mod
+        loss = outputs["loss"]
+        fit_mse += loss.item() * n_samples
+    return z, fit_mse
+
+def load_dynamics_modulations_sep_lr(
+    trainset,
+    trainset_extra,
+    valset,
+    inr,
+    run_dir,
+    run_name,
+    inner_steps=3,
+    alpha=0.01,
+    alpha_grid=0.01,
+    code_dim=128,
+    two_stage=False,
+    batch_size=2,
+    data_to_encode=None,
+    try_reload=False,
+):
+    """WARNING : This function assumes that we can encode a full trajectory"""
+    run_dir = Path(run_dir)
+    if try_reload:
+        try:
+            print('load modulations successfully')
+            return torch.load(run_dir / f"{run_name}.pt")
+        except:
+            try_reload = False
+    else:
+        print('modulations generation begin')
+        train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
+        train_extra_loader = DataLoader(trainset_extra, batch_size=batch_size, shuffle=True)
+        test_loader = DataLoader(valset, batch_size=batch_size, shuffle=True)
+
+        ntrain = len(trainset)
+        ntest = len(valset)
+        latent_dim = trainset.latent_dim
+        T_train = trainset.T
+        T_test = valset.T
+
+        # add reconstruction loss as in FNO paper
+        z_tr = torch.zeros(ntrain, latent_dim, T_train)
+        z_tr_extra = torch.zeros(ntrain, latent_dim, T_test)
+        z_te = torch.zeros(ntest, latent_dim, T_test)
+
+        inr.eval()
+
+        z_tr, fit_train_mse = eval_modulation_loop_sep_lr(train_loader, inr, inner_steps, alpha, alpha_grid, z_tr, T_train, code_dim, two_stage)
+        print(f"Train, average loss: {fit_train_mse / ntrain}")
+
+        z_tr_extra, fit_train_extra_mse = eval_modulation_loop_sep_lr(train_extra_loader, inr, inner_steps, alpha, alpha_grid, z_tr_extra, T_test, code_dim, two_stage)
+
+        print(f"Train extra, average loss: {fit_train_extra_mse / ntrain}")
+
+        z_te, fit_test_mse = eval_modulation_loop_sep_lr(test_loader, inr, inner_steps, alpha, alpha_grid, z_te, T_test, code_dim, two_stage)
+
+        print(f"Test, average loss: {fit_test_mse / ntest}")
+
+        modulations = {
+            "z_train": z_tr,
+            "z_train_extra": z_tr_extra,
+            "z_test": z_te,
+            "fit_train_mse": fit_train_mse / ntrain,
+            "fit_train_extra_mse": fit_train_extra_mse / ntrain,
+            "fit_test_mse": fit_test_mse / ntest,
+        }
+
+        os.makedirs(str(run_dir), exist_ok=True)
+        torch.save(modulations, str(run_dir / f"{run_name}.pt"))
+
+        return modulations
+    
 def load_dynamics_modulations(
     trainset,
     trainset_extra,

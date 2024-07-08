@@ -61,6 +61,9 @@ def batch_eval_loop(model, inr, loader, timestamps, detailed_mse,
                 pred = get_reconstructions(
                     inr, coords, z_pred, z_mean, z_std, dataset_name
                 )
+                # pred = get_reconstructions(
+                #     inr, coords, torch.cat([z_pred[...,:128,:], z_pred[...,128:,:]], dim=-2), z_mean, z_std, dataset_name
+                # )
             pred_mse = ((pred - images) ** 2)
             pred_mse_inter_local = pred_mse[..., :interpolation_seq].mean()
             pred_mse_extra_local = pred_mse[..., interpolation_seq:].mean()

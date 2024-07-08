@@ -40,6 +40,7 @@ optim:
   use_cls: False
   temperature: 1.0
   w_cl: 1.0 
+  lr_grid : 0.01
 
 inr:
   model_type : "siren"
@@ -57,7 +58,23 @@ inr:
   use_norm: True 
   grid_size: 64
   siren_init: True
-
+  n_levels: 4
+  n_features_per_level: 2
+  log2_hashmap_size: 12
+  base_resolution: 4
+  per_level_scale: 2
+  base_sigma: 5.0
+  exp_sigma: 2.0
+  num_init: 1
+  scale_init: 1e-3
+  grid_base: 64
+  grid_sum: True
+  share_grid: False
+  share_code: True
+  k_mixture: 256
+  grid_init_channel: 32
+  grid_scale_ratio: 1.0
+  
 wandb:
   entity: "wanghonghui1998"
   project: "functa2functa"
