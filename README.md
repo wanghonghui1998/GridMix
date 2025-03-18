@@ -1,38 +1,30 @@
-# 0. Official Code
-Official PyTorch implementation of CORAL | [Accepted at Neurips 2023](https://openreview.net/forum?id=4jEjq5nhg1&referrer=%5BAuthor%20Console%5D(%2Fgroup%3Fid%3DNeurIPS.cc%2F2023%2FConference%2FAuthors%23your-submissions)) | [Arxiv](https://arxiv.org/abs/2306.07266)
+# GridMix
+This repo contains the official PyTorch code for GridMix (ICLR 2025, **Oral**).
 
-<p float="left">
-  <img src="./images/poster_inference.png" width="400" style="margin-right: 10px;"/>
-  <img src="./images/poster_siren.png" width="400" /> 
++ [GridMix: Exploring Spatial Modulation for Neural Fields in PDE Modeling](https://openreview.net/forum?id=Fur0DtynPX&referrer=%5BAuthor%20Console%5D(%2Fgroup%3Fid%3DICLR.cc%2F2025%2FConference%2FAuthors%23your-submissions))
+
+## Overview
+
+GridMix is a novel approach that improves spatial modulation in neural fields by leveraging a mixture of grid-based representations. Existing methods rely on global modulation, which limits local detail reconstruction, while vanilla grid-based approaches struggle with overfitting and inadequate global information modeling. GridMix addresses these challenges by balancing global structure exploration with fine-grained locality preservation.
+
+To further enhance robustness, we introduce spatial domain augmentation, improving generalization across varying spatial domains. GridMix serves as a key component of MARBLE, a comprehensive framework advancing PDE modeling with neural fields. Our method is extensively validated on benchmarks in dynamics modeling and geometric prediction, demonstrating significant improvements.
+
+<p align="center">
+    <img src="figures/gridmix.png" width= "600">
 </p>
 
-To cite our work:
+## Installation
+Clone the repo and install the dependencies.
 ```
-@article{serrano2023operator,
-      title={Operator Learning with Neural Fields: Tackling PDEs on General Geometries}, 
-      author={Louis Serrano and Lise Le Boudec and Armand Kassaï Koupaï and Thomas X Wang and Yuan Yin and Jean-Noël Vittaut and Patrick Gallinari},
-      journal={37th Conference on Neural Information Processing Systems (NeurIPS 2023)},
-      year={2023},
-      url={https://arxiv.org/abs/2306.07266}
-}
-```
-
-# 1. Code installation and setup
-## coral installation
-```
-conda create -n coral python=3.9.0
+git clone https://github.com/LeapLabTHU/GridMix.git
+cd GridMix
+conda create -n marble python=3.9.0
 pip install -e .
-```
-
-## install torch_geometric and torch_geometric extensions
-```
 pip install torch_geometric
 pip install pyg_lib torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.0.0+cu117.html
 ```
 
-## setup wandb config example
-
-add to your `~/.bashrc`
+Setup wandb config in `~/.bashrc`
 ```
 export WANDB_API_TOKEN=your_key
 export WANDB_DIR=your_dir
@@ -41,94 +33,46 @@ export WANDB_CONFIG_DIR="${WANDB_DIR}config/wandb"
 export MINICONDA_PATH=your_anaconda_path
 ```
 
-# 2. Data
-
-* IVP: Cylinder and Airfoil datasets can be downloaded from : https://github.com/deepmind/deepmind-research/tree/master/meshgraphnets
-* Dynamics Modeling: NS and SW data can be generated using https://github.com/mkirchmeyer/DINo
-* Geo-FNO: NACA-Euler, Elasticity and pipe data can be downloaded from https://drive.google.com/drive/folders/1YBuaoTdOSr_qzaow-G-iwvbUI7fiUzu8 (Note that NACA-Euler stands for Airfoil in this google drive)
+## Data preparation 
+* Dynamics Modeling: NS and SW data can be generated using [DINo](https://github.com/mkirchmeyer/DINo) repo. We provide the generated data in `data/dynamics`.
+* Geometric-aware inference: NACA-Euler, Elasticity and pipe data can be downloaded from [google drive](https://drive.google.com/drive/folders/1YBuaoTdOSr_qzaow-G-iwvbUI7fiUzu8), which is provided by [Geo-FNO](https://github.com/neuraloperator/Geo-FNO.git) repo.
 
 
-
-# 3. Run experiments 
-![plot](./images/poster_training.png)
-
-The code runs only on GPU. We provide sbatch configuration files to run the training scripts. They are located in `bash_static` and `bash_dynamics`. 
-We expect the user to have wandb installed in its environment to ease the 2-step training. 
-For all tasks, the first step is to launch an inr.py training. The weights of the inr model are automatically saved under its `run_name`.
-For the second step, i.e. for training the dynamics or inference model, we need to use the previous `run_name` as input to the config file to load the inr model.
-We provide examples of the python scripts that need to be run.
-
-## IVP
-
-![plot](./images/cylinder_flow_3.png)
-
-  * airfoil-flow: 
-  ``` 
-  python3 static/train/ivp_inr.py "data.dataset_name=airfoil-flow" 'optim.epochs=5000' 'inr_in.w0=5' 'inr_out.w0=5' 'inr_in.latent_dim=128' 'inr_in.hidden_dim=256' 'inr_out.hidden_dim=256' 'inr_out.latent_dim=128' 'model.width=256' 'optim.batch_size=32' 'optim.meta_lr_code=5e-6'
-  ```
-  ```
-  python3 static/train/ivp_regression.py "data.dataset_name=airfoil-flow" "inr.run_name=dandy-lion-4438" "optim.epochs=101"
-  ```
-  * cylinder-flow:
-  ```
-  python3 static/train/ivp_inr.py "data.dataset_name=cylinder-flow" 'optim.epochs=5000' 'inr_in.w0=20' 'inr_out.w0=15' 'inr_in.latent_dim=128' 'inr_out.latent_dim=128' 'optim.epochs=2000' 'model.width=64'
-  ```
-  ```
-  python3 static/train/ivp_regression.py "data.dataset_name=cylinder-flow" "inr.run_name=dandy-puddle-3918" "optim.epochs=2001"
-  ```
- 
-
-## Design
-
-* naca-euler:
-![plot](./images/airfoil_prediction.png)
+## Training 
+For dynamics modeling, we provide the training scripts in `repro_dynamics`. Taking the navier-stokes data as an example, the two-step training process is as follows:
 ```
-python3 static/train/design_inr.py "data.dataset_name=airfoil" 'optim.epochs=5000' 'inr_in.w0=5' 'inr_out.w0=15' 'optim.lr_inr=1e-4' 'optim.meta_lr_code=1e-4'
+# train the inr model
+bash ./repro_dynamics/navier-stokes/marble_ns_s1_bash.sh
+
+# train the dynamics model
+bash ./repro_dynamics/navier-stokes/marble_ns_s1_ode_bash.sh
 ```
 
+For geometric-aware inference, we provide the training scripts in `repro_static`. Taking the elasticity data as an example, the training process is as follows:
 ```
-python3 static/train/design_regression.py "data.dataset_name=airfoil" "inr.run_name=glowing-music-4181" 'optim.epochs=10000'
-```
-* elasticity
+# train the inr model with global modulation for input functions
+bash ./repro_static/elasticity/coral_inr_bash.sh
 
-![plot](./images/elasticity_prediction.png)
-```
-python3 static/train/design_inr.py "data.dataset_name=elasticity" 'optim.batch_size=64' 'optim.epochs=5000' 'inr_in.w0=10' 'inr_out.w0=15' 'optim.lr_inr=1e-4' 'optim.meta_lr_code=1e-4' 
-```
-```
-python3 static/train/design_regression.py "data.dataset_name=elasticity" "inr.run_name=clone-nerf-herder-4289" 'optim.epochs=10000'
-```
-* pipe
-```
-python3 static/train/design_inr.py "data.dataset_name=pipe" 'optim.batch_size=16' 'optim.epochs=5000' 'inr_in.w0=5' 'inr_out.w0=10' 'inr_in.hidden_dim=128' 'inr_in.depth=5' 'inr_out.hidden_dim=128' 'inr_out.depth=5' 'optim.lr_inr=5e-5' 'optim.meta_lr_code=5e-5' 
+# train the inr model with gridmix modulation for output functions
+bash ./repro_static/elasticity/marble_inr_bash.sh
+
+# train the regression model
+bash ./repro_static/elasticity/marble_regression_bash.sh
 ```
 
-```
-python3 static/train/design_regression.py "data.dataset_name=pipe" "inr.run_name=super-plasma-4149" 'optim.epochs=10000' 'model.width=128' 'model.depth=3' 'inr.inner_steps=3' 
-```
+## Acknowledgement
+This code is developed on the top of [CORAL](https://github.com/LouisSerrano/coral.git), we thank to their efficient and neat codebase.
 
-## Dynamics modeling
-* navier-stokes:
-![plot](./images/ns-qual-res.jpg)
-```
-python3 inr/inr.py "data.sub_from=$sub_from" "data.same_grid=$same_grid" "data.dataset_name=$dataset_name" "inr.model_type=$model_type" "data.seq_inter_len=$seq_inter_len" "data.seq_extra_len=$seq_extra_len" "data.sub_tr=$sub_tr" "data.sub_te=$sub_te" "optim.lr_inr=$lr_inr" "inr.depth=$depth" "inr.latent_dim=$latent_dim" "inr.hidden_dim=$hidden_dim" "optim.batch_size=$batch_size" "optim.epochs=$epochs" "wandb.saved_checkpoint=$saved_checkpoint" #"wandb.name=$name" "wandb.id=$id" "wandb.dir=$dir" "wandb.checkpoint_path=$checkpoint_path"
-```
+## Citation 
+If you find our work is useful in your research, please consider citing:
 
 ```
-python3 dynamics_modeling/train.py "data.sub_from=$sub_from" "data.same_grid=$same_grid" "data.dataset_name=$dataset_name" "dynamics.width=$width" "dynamics.depth=$depth" "data.sub_tr=$sub_tr" "data.sub_te=$sub_te" "optim.epochs=$epochs" "data.seq_inter_len=$seq_inter_len" "data.seq_extra_len=$seq_extra_len" "optim.batch_size=$batch_size" "optim.lr=$lr"  "dynamics.teacher_forcing_update=$teacher_forcing_update" "inr.run_name=$run_name"
+@inproceedings{wanggridmix,
+  title={GridMix: Exploring Spatial Modulation for Neural Fields in PDE Modeling},
+  author={Wang, Honghui and Song, Shiji and Huang, Gao},
+  booktitle={The Thirteenth International Conference on Learning Representations},
+  year={2025},
+}
 ```
- 
-* shallow-water:
-```
-python3 inr/inr.py "data.sub_from=$sub_from" "data.same_grid=$same_grid" "data.dataset_name=$dataset_name" "data.data_to_encode=$data_to_encode" "data.seq_inter_len=$seq_inter_len" "data.seq_extra_len=$seq_extra_len" "data.sub_tr=$sub_tr" "data.sub_te=$sub_te" "optim.lr_inr=$lr_inr" "inr.depth=$depth" "inr.latent_dim=$latent_dim" "inr.hidden_dim=$hidden_dim" "optim.batch_size=$batch_size" "inr.w0=$w0" "optim.epochs=$epochs" "wandb.saved_checkpoint=$saved_checkpoint" #"wandb.name=$name" "wandb.id=$id" "wandb.dir=$dir" "wandb.checkpoint_path=$checkpoint_path"  
-```
-```
-python3 dynamics_modeling/train.py "data.sub_from=$sub_from" "data.same_grid=$same_grid" "data.dataset_name=$dataset_name" "dynamics.width=$width" "dynamics.depth=$depth" "data.sub_tr=$sub_tr" "data.sub_te=$sub_te" "optim.epochs=$epochs" "data.seq_inter_len=$seq_inter_len" "data.seq_extra_len=$seq_extra_len" "optim.batch_size=$batch_size" "optim.lr=$lr"  "dynamics.teacher_forcing_update=$teacher_forcing_update" "inr.run_dict=$run_dict"
-```
-
-with dataset_name='navier-stokes-dino' or 'shallow-water-dino'.
-
-
-
-
-
+## Contact
+If you have any questions, please feel free to contact us at wanghh20@mails.tsinghua.edu.cn.
