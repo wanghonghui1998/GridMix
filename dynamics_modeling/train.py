@@ -3,7 +3,7 @@ from coral.utils.models.scheduling import ode_scheduling
 from coral.utils.models.load_inr import create_inr_instance, load_inr_model
 from coral.utils.models.get_inr_reconstructions import get_reconstructions
 from coral.utils.data.load_modulations import load_dynamics_modulations
-from coral.utils.data.load_data import get_dynamics_data, set_seed
+from coral.utils.data.load_data import get_dynamics_data, set_seed, get_dynamics_data_with_full_data
 from coral.utils.data.dynamics_dataset import (KEY_TO_INDEX, TemporalDatasetWithCode)
 from coral.mlp import Derivative, DerivativeFNO1d
 from torchdiffeq import odeint
@@ -18,7 +18,7 @@ import einops
 import os
 import sys
 from pathlib import Path
-from dynamics_modeling.eval import batch_eval_loop
+from dynamics_modeling.eval import batch_eval_loop, batch_eval_loop_full_grid
 
 sys.path.append(str(Path(__file__).parents[1]))
 
@@ -93,8 +93,8 @@ def main(cfg: DictConfig) -> None:
     model_type = cfg.dynamics.model_type
     hidden = cfg.dynamics.width
     depth = cfg.dynamics.depth
-    epsilon = cfg.dynamics.teacher_forcing_init
-    epsilon_t = cfg.dynamics.teacher_forcing_decay
+    epsilon_t = cfg.dynamics.teacher_forcing_init
+    epsilon = cfg.dynamics.teacher_forcing_decay
     epsilon_freq = cfg.dynamics.teacher_forcing_update
 
     # wandb
@@ -184,6 +184,19 @@ def main(cfg: DictConfig) -> None:
         sub_te=sub_te,
         same_grid=same_grid,
     )
+    # (u_train, u_train_eval, u_test, grid_tr, grid_tr_extra, grid_te, full_u_test, full_grid_te) = get_dynamics_data_with_full_data(
+    #     data_dir,
+    #     dataset_name,
+    #     ntrain,
+    #     ntest,
+    #     seq_inter_len=seq_inter_len,
+    #     seq_extra_len=seq_extra_len,
+    #     sub_from=sub_from,
+    #     sub_tr=sub_tr,
+    #     sub_te=sub_te,
+    #     same_grid=same_grid,
+    # )
+
     print(
         f"data: {dataset_name}, u_train: {u_train.shape}, u_train_eval: {u_train_eval.shape}, u_test: {u_test.shape}")
     print(f"grid: grid_tr: {grid_tr.shape}, grid_tr_extra: {grid_tr_extra.shape}, grid_te: {grid_te.shape}")
@@ -296,7 +309,7 @@ def main(cfg: DictConfig) -> None:
                 tmp_name,
                 inner_steps=inner_steps,
                 alpha=alpha,
-                batch_size=2,
+                batch_size=1,
                 data_to_encode=to_encode,
                 try_reload=False,
             )
@@ -347,7 +360,7 @@ def main(cfg: DictConfig) -> None:
     )
     test_loader = torch.utils.data.DataLoader(
         testset,
-        batch_size=batch_size_val//8,
+        batch_size=batch_size_val//4,
         shuffle=False,
         num_workers=1,
     )
@@ -413,20 +426,21 @@ def main(cfg: DictConfig) -> None:
     # eval 
     evaluate = cfg.wandb.evaluate
     if evaluate:
-        pred_train_inter_mse, code_train_inter_mse, pred_train_extra_mse, code_train_extra_mse, total_pred_train_mse, detailed_train_eval_mse = batch_eval_loop(
-                    model, inr, train_extra_loader,
-                    timestamps_test, detailed_train_eval_mse,
-                    ntrain, multichannel, z_mean, z_std,
-                    dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'train_{epoch_start}')
-                )
+        # pred_train_inter_mse, code_train_inter_mse, pred_train_extra_mse, code_train_extra_mse, total_pred_train_mse, detailed_train_eval_mse = batch_eval_loop(
+        #             model, inr, train_extra_loader,
+        #             timestamps_test, detailed_train_eval_mse,
+        #             ntrain, multichannel, z_mean, z_std,
+        #             dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'train_{epoch_start}')
+        #         )
 
-        pred_test_inter_mse, code_test_inter_mse, pred_test_extra_mse, code_test_extra_mse, pred_test_mse, detailed_test_mse = batch_eval_loop(
-                    model, inr, test_loader,
+        pred_test_inter_mse, code_test_inter_mse, pred_test_extra_mse, code_test_extra_mse, pred_test_mse, detailed_test_mse = batch_eval_loop_full_grid(
+                    model, inr, test_loader, full_u_test, full_grid_te,
                     timestamps_test, detailed_test_mse,
                     ntest, multichannel, z_mean, z_std,
                     dataset_name, T_train, n_cond, visual_first=4, visual_path=os.path.join(run.dir, f'test_{epoch_start}')
                 )
-        print(f'train inter mse {pred_train_inter_mse}, train_extra_mse {pred_train_extra_mse}, test inter mse {pred_test_inter_mse}, test extra mse {pred_test_extra_mse}')
+        # print(f'train inter mse {pred_train_inter_mse}, train_extra_mse {pred_train_extra_mse}, test inter mse {pred_test_inter_mse}, test extra mse {pred_test_extra_mse}')
+        print(f'test inter mse {pred_test_inter_mse}, test extra mse {pred_test_extra_mse}')
         return 
 
     for step in range(epochs):
@@ -512,6 +526,7 @@ def main(cfg: DictConfig) -> None:
                     "code_train_extra_mse": code_train_extra_mse,
                     "code_test_inter_mse": code_test_inter_mse,
                     "code_test_extra_mse": code_test_extra_mse,
+                    "epsilon_t": epsilon_t,
                 }
                 
                 if multichannel:

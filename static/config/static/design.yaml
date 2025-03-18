@@ -6,7 +6,7 @@ defaults:
   - wandb: null
 
 data:
-  dir: "/data/serrano/deeponet-fourier-data"
+  dir: "/cluster/nvme4a/whh/dataset/geo-fno"
   dataset_name: "airfoil-flow" 
   data_to_encode:
   ntrain : 
@@ -31,6 +31,11 @@ optim:
   epochs : 1000
   lr_mlp : 1e-3
   weight_decay_mlp: 0
+  lr_grid : 0.01
+  optim_out: True
+  optim_in: True 
+  share_latent_sync: False
+  decode_in_prob: 0.5
 
 inr_in:
   model_type : "siren"
@@ -45,6 +50,14 @@ inr_in:
   hypernet_width: 128
   last_activation: 
   loss_type: "mse"
+  use_norm: True 
+  grid_size: 64
+  grid_size_2: 0
+  siren_init: True
+  grid_base: 64
+  grid_sum: True
+  share_grid: False
+  run_name:
 
 inr_out:
   model_type : "siren"
@@ -59,14 +72,21 @@ inr_out:
   hypernet_width: 128
   last_activation: 
   loss_type: "mse"
+  use_norm: True 
+  grid_size: 64
+  grid_size_2: 0
+  siren_init: True
+  grid_base: 64
+  grid_sum: True
+  share_grid: False
 
 model:
   model_type: resnet
   depth: 3
-  width: 128
+  width: 64
   dropout: 0
   activation: swish
-
+  lr: 1e-3
 # airfoil
 inr:
   inner_steps: 3
@@ -78,14 +98,23 @@ inr:
     vy: fresh-wave-3583
 
 wandb:
-  entity: "spatiotemp-isir"
-  project: "functa2functa"
+  entity: "wanghonghui1998"
+  project: "marble"
   name: 
   id: 
   dir: 
   sweep_id: 
+  saved_checkpoint: False
+  checkpoint_path:
 
-
+distributed: False
+world_size: 1
+gpu_id: 0
+rank: 0 
+ddp:
+  port : 29051
+  launcher: 
+  
 jz: 
   program: training/inr.py
   mode: dev

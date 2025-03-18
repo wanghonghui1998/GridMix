@@ -225,3 +225,85 @@ def show(imgs, preds, coords, img_path, num_examples=2):
             wandb.log({img_path: fig})
 
     plt.close(fig)
+
+
+def write_elasticity(imgs, preds, coords, img_path, num_examples=2):
+    input_dim = coords.shape[-1]
+    output_dim = imgs.shape[-1]
+    regular = not ((len(preds.shape[1:-1]) == 1) & (input_dim > len(preds.shape[1:-1])))
+    imgs = imgs.cpu().detach()
+    preds = preds.cpu().detach()
+    coords = coords.cpu().detach()
+    batch_size = imgs.shape[0]
+    num_examples = min(batch_size, num_examples)
+    print(imgs.shape, preds.shape)
+    print("input dim", input_dim, "output dim", output_dim, "regular", regular)
+
+    error = np.abs(imgs-preds)
+    import matplotlib.colors as clr
+    def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=100):
+        new_cmap = clr.LinearSegmentedColormap.from_list(
+            'trunc({n},{a:.2f},{b:.2f})'.format(n=cmap.name, a=minval, b=maxval),
+            cmap(np.linspace(minval, maxval, n)))
+        return new_cmap
+    cmap_e = plt.get_cmap("RdBu_r")
+    cmap_e = truncate_colormap(cmap_e, 0.5, 1.0)
+
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    for i in range(num_examples):
+        fig, axs = plt.subplots(1, 1, squeeze=False)
+        lims = dict(cmap="RdBu_r", vmin=imgs[i].min(), vmax=imgs[i].max())
+        im = axs[0, 0].scatter(
+            np.asarray(coords[i, :, 0]),
+            np.asarray(coords[i, :, 1]),
+            200,
+            c=np.asarray(imgs[i, ..., 0]),
+            edgecolor="black",
+            lw=0.5,
+            **lims,
+        )
+        # divider = make_axes_locatable(axs[0, 0])
+        # cax = divider.append_axes('right', size='5%', pad=0.05)
+        # fig.colorbar(im, cax=cax, orientation='vertical')
+        # axs[0, 0].set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
+        plt.savefig(img_path+f'{i}gt.png', dpi=72, bbox_inches='tight', pad_inches=0)
+        plt.close(fig)
+
+
+        fig, axs = plt.subplots(1, 1, squeeze=False)
+        lims = dict(cmap="RdBu_r", vmin=imgs[i].min(), vmax=imgs[i].max())
+        im = axs[0, 0].scatter(
+            np.asarray(coords[i, :, 0]),
+            np.asarray(coords[i, :, 1]),
+            200,
+            c=np.asarray(preds[i, ..., 0]),
+            edgecolor="black",
+            lw=0.5,
+            **lims,
+        )
+        # divider = make_axes_locatable(axs[0, 0])
+        # cax = divider.append_axes('right', size='5%', pad=0.05)
+        # fig.colorbar(im, cax=cax, orientation='vertical')
+        # axs[0, 0].set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
+        plt.savefig(img_path+f'{i}pred.png', dpi=72, bbox_inches='tight', pad_inches=0)
+        plt.close(fig)
+
+        
+        fig, axs = plt.subplots(1, 1, squeeze=False)
+        lims = dict(cmap=cmap_e, vmin=0, vmax=0.2)
+        print(error[i].min(), error[i].max())
+        im = axs[0, 0].scatter(
+            np.asarray(coords[i, :, 0]),
+            np.asarray(coords[i, :, 1]),
+            200,
+            c=np.asarray(error[i, ..., 0]),
+            edgecolor="black",
+            lw=0.5,
+            **lims,
+        )
+        # divider = make_axes_locatable(axs[0, 0])
+        # cax = divider.append_axes('right', size='5%', pad=0.05)
+        # fig.colorbar(im, cax=cax, orientation='vertical')
+        # axs[0, 0].set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
+        plt.savefig(img_path+f'{i}err.png', dpi=72, bbox_inches='tight', pad_inches=0)
+        plt.close(fig)

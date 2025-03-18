@@ -272,7 +272,7 @@ def main(cfg: DictConfig) -> None:
                 weight_decay=0,
             )
         else:
-            if 'MoG' in model_type:
+            if 'GridMix' in model_type:
                 params_net = []
                 params_grid = []
                 for name, param in inr.named_parameters():
@@ -282,14 +282,15 @@ def main(cfg: DictConfig) -> None:
                         params_net.append(param)
 
                 optimizer = torch.optim.AdamW(
-                [
-                    {"params": params_net, "lr": lr_inr},
-                    {"params": params_grid, "lr": lr_grid},
-                    {"params": alpha, "lr": meta_lr_code, "weight_decay": weight_decay_lr_code},
-                ],
-                lr=lr_inr,
-                weight_decay=0,
-            )
+                    [
+                        {"params": params_net, "lr": lr_inr},
+                        {"params": params_grid, "lr": lr_grid},
+                        {"params": alpha, "lr": meta_lr_code, "weight_decay": weight_decay_lr_code},
+                    ],
+                    lr=lr_inr,
+                    weight_decay=0,
+                )
+                print('optimize gridmix')
             else:
                 optimizer = torch.optim.AdamW(
                     [

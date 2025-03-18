@@ -55,10 +55,14 @@ def main(cfg: DictConfig) -> None:
     epochs = cfg.optim.epochs
     lr_mlp = cfg.optim.lr_mlp
     weight_decay_mlp = cfg.optim.weight_decay_mlp
+    lr_grid = cfg.optim.lr_grid
+    optim_out = cfg.optim.optim_out
+    optim_in = cfg.optim.optim_in
 
     # inr
     latent_dim = cfg.inr_in.latent_dim
-
+    in_model_type = cfg.inr_in.model_type
+    out_model_type = cfg.inr_out.model_type
     # wandb
     entity = cfg.wandb.entity
     project = cfg.wandb.project
@@ -189,31 +193,100 @@ def main(cfg: DictConfig) -> None:
     inr_out = create_inr_instance(
         cfg, input_dim=input_dim, output_dim=output_dim_out, device="cuda"
     )
-
+    print(inr_in)
+    print(inr_out)
     alpha_in = nn.Parameter(torch.Tensor([lr_code]).cuda())
     alpha_out = nn.Parameter(torch.Tensor([lr_code]).cuda())
 
-    optimizer_in = torch.optim.AdamW(
-        [
-            {"params": inr_in.parameters()},
-            {"params": alpha_in, "lr": meta_lr_code, "weight_decay": 0},
-        ],
-        lr=lr_inr,
-        weight_decay=0,
-    )
+    if 'GridMix' in in_model_type:
+        in_params_net = []
+        in_params_grid = []
+        for name, param in inr_in.named_parameters():
+            if 'grid_base' in name:
+                in_params_grid.append(param)
+            else:
+                in_params_net.append(param)
 
-    optimizer_out = torch.optim.AdamW(
-        [
-            {"params": inr_out.parameters()},
-            {"params": alpha_out, "lr": meta_lr_code, "weight_decay": 0},
-        ],
-        lr=lr_inr,
-        weight_decay=0,
-    )
+        optimizer_in = torch.optim.AdamW(
+            [
+                {"params": in_params_net, "lr": lr_inr},
+                {"params": in_params_grid, "lr": lr_grid},
+                {"params": alpha_in, "lr": meta_lr_code, "weight_decay": 0},
+            ],
+            lr=lr_inr,
+            weight_decay=0,
+        )
+    else:
+        optimizer_in = torch.optim.AdamW(
+            [
+                {"params": inr_in.parameters()},
+                {"params": alpha_in, "lr": meta_lr_code, "weight_decay": 0},
+            ],
+            lr=lr_inr,
+            weight_decay=0,
+        )
+
+    if 'GridMix' in out_model_type:
+        out_params_net = []
+        out_params_grid = []
+        for name, param in inr_out.named_parameters():
+            if 'grid_base' in name:
+                out_params_grid.append(param)
+            else:
+                out_params_net.append(param)
+
+        optimizer_out = torch.optim.AdamW(
+            [
+                {"params": out_params_net, "lr": lr_inr},
+                {"params": out_params_grid, "lr": lr_grid},
+                {"params": alpha_out, "lr": meta_lr_code, "weight_decay": 0},
+            ],
+            lr=lr_inr,
+            weight_decay=0,
+        )
+    else:
+        optimizer_out = torch.optim.AdamW(
+            [
+                {"params": inr_out.parameters()},
+                {"params": alpha_out, "lr": meta_lr_code, "weight_decay": 0},
+            ],
+            lr=lr_inr,
+            weight_decay=0,
+        )
 
     best_loss = np.inf
     
-    for step in range(epochs):
+    saved_checkpoint = cfg.wandb.saved_checkpoint
+    if saved_checkpoint:
+        # "cfg": cfg,
+        #                 "epoch": step,
+        #                 "inr_in": inr_in.state_dict(),
+        #                 "inr_out": inr_out.state_dict(),
+        #                 "optimizer_inr_in": optimizer_in.state_dict(),
+        #                 "optimizer_inr_out": optimizer_out.state_dict(),
+        #                 "loss": test_loss_out,
+        #                 "alpha_in": alpha_in,
+        #                 "alpha_out": alpha_out,
+        print(f'load {cfg.wandb.checkpoint_path}')
+        checkpoint = torch.load(cfg.wandb.checkpoint_path)
+        inr_in.load_state_dict(checkpoint['inr_in'])
+        inr_out.load_state_dict(checkpoint['inr_out'])
+
+        optimizer_in.load_state_dict(checkpoint['optimizer_inr_in'])
+        optimizer_out.load_state_dict(checkpoint['optimizer_inr_out'])
+        alpha_in = checkpoint['alpha_in']
+        alpha_out = checkpoint['alpha_out']
+        epoch_start = checkpoint['epoch']
+        # alpha = checkpoint['alpha']
+        # best_loss = checkpoint['loss']
+        # cfg = checkpoint['cfg']
+        # print("cfg : ", cfg)
+    elif saved_checkpoint == False:
+        epoch_start = 0
+        # best_loss = np.inf
+    print("epoch_start", epoch_start)
+
+    for step in range(epoch_start, epochs):
         fit_train_mse_in = 0
         fit_test_mse_in = 0
         rel_train_mse_out = 0
@@ -236,64 +309,66 @@ def main(cfg: DictConfig) -> None:
             coords = coords.cuda()
             n_samples = a_s.shape[0]
 
-            # input
-            outputs = outer_step(
-                inr_in,
-                coords,
-                a_s,
-                inner_steps,
-                alpha_in,
-                is_train=True,
-                return_reconstructions=False,
-                gradient_checkpointing=False,
-                use_rel_loss=use_pred_loss,
-                loss_type="mse",
-                modulations=torch.zeros_like(za_s),
-            )
+            if optim_in:
+                # input
+                outputs = outer_step(
+                    inr_in,
+                    coords,
+                    a_s,
+                    inner_steps,
+                    alpha_in,
+                    is_train=True,
+                    return_reconstructions=False,
+                    gradient_checkpointing=False,
+                    use_rel_loss=use_pred_loss,
+                    loss_type="mse",
+                    modulations=torch.zeros_like(za_s),
+                )
 
-            optimizer_in.zero_grad()
-            outputs["loss"].backward(create_graph=False)
-            nn.utils.clip_grad_value_(inr_in.parameters(), clip_value=1.0)
-            optimizer_in.step()
-            loss = outputs["loss"].cpu().detach()
-            fit_train_mse_in += loss.item() * n_samples
-            z0 = outputs["modulations"].detach()
+                optimizer_in.zero_grad()
+                outputs["loss"].backward(create_graph=False)
+                nn.utils.clip_grad_value_(inr_in.parameters(), clip_value=1.0)
+                optimizer_in.step()
+                loss = outputs["loss"].cpu().detach()
+                fit_train_mse_in += loss.item() * n_samples
+                z0 = outputs["modulations"].detach()
 
-            # mu0 = beta1 * mu0 + (1-beta1)*z0.mean(0)
-            # sigma0 = beta1 * sigma0 + (1-beta1)*z0.std(0) + 1e-8
+                # mu0 = beta1 * mu0 + (1-beta1)*z0.mean(0)
+                # sigma0 = beta1 * sigma0 + (1-beta1)*z0.std(0) + 1e-8
 
-            if step_show and substep == 0:
-                u_pred = inr_in.modulated_forward(coords, z0)
-                with torch.no_grad():
-                    show(a_s, u_pred, coords, "train_input", num_examples=4)
+                if step_show and substep == 0:
+                    u_pred = inr_in(coords, z0)
+                    with torch.no_grad():
+                        show(a_s, u_pred, coords, "train_input", num_examples=4)
 
-            # output
-            outputs = outer_step(
-                inr_out,
-                coords,
-                u_s,
-                inner_steps,
-                alpha_out,
-                is_train=True,
-                return_reconstructions=False,
-                gradient_checkpointing=False,
-                use_rel_loss=use_pred_loss,
-                loss_type="mse",
-                modulations=torch.zeros_like(za_s),
-            )
+            if optim_out:
+                # output
+                outputs = outer_step(
+                    inr_out,
+                    coords,
+                    u_s,
+                    inner_steps,
+                    alpha_out,
+                    is_train=True,
+                    return_reconstructions=False,
+                    gradient_checkpointing=False,
+                    use_rel_loss=use_pred_loss,
+                    loss_type="mse",
+                    modulations=torch.zeros_like(za_s),
+                )
 
-            optimizer_out.zero_grad()
-            outputs["loss"].backward(create_graph=False)
-            nn.utils.clip_grad_value_(inr_out.parameters(), clip_value=1.0)
-            optimizer_out.step()
-            loss = outputs["loss"].cpu().detach()
-            fit_train_mse_out += loss.item() * n_samples
+                optimizer_out.zero_grad()
+                outputs["loss"].backward(create_graph=False)
+                nn.utils.clip_grad_value_(inr_out.parameters(), clip_value=1.0)
+                optimizer_out.step()
+                loss = outputs["loss"].cpu().detach()
+                fit_train_mse_out += loss.item() * n_samples
 
-            # mlp regression
-            z1 = outputs["modulations"].detach()
+                # mlp regression
+                z1 = outputs["modulations"].detach()
 
-            # mu1 = beta1 * mu1 + (1-beta1)*z1.mean(0)
-            # sigma1 = beta1 * sigma1 + (1-beta1)*z1.std(0) + 1e-8
+                # mu1 = beta1 * mu1 + (1-beta1)*z1.mean(0)
+                # sigma1 = beta1 * sigma1 + (1-beta1)*z1.std(0) + 1e-8
 
 
         train_loss_in = fit_train_mse_in / (ntrain)
@@ -314,51 +389,52 @@ def main(cfg: DictConfig) -> None:
             coords = coords.cuda()
             n_samples = a_s.shape[0]
 
-            # input
-            outputs = outer_step(
-                inr_in,
-                coords,
-                a_s,
-                inner_steps,
-                alpha_in,
-                is_train=False,
-                return_reconstructions=False,
-                gradient_checkpointing=False,
-                use_rel_loss=use_pred_loss,
-                loss_type="mse",
-                modulations=torch.zeros_like(za_s),
-            )
+            if optim_in:
+                # input
+                outputs = outer_step(
+                    inr_in,
+                    coords,
+                    a_s,
+                    inner_steps,
+                    alpha_in,
+                    is_train=False,
+                    return_reconstructions=False,
+                    gradient_checkpointing=False,
+                    use_rel_loss=use_pred_loss,
+                    loss_type="mse",
+                    modulations=torch.zeros_like(za_s),
+                )
 
-            loss = outputs["loss"].cpu().detach()
-            fit_test_mse_in += loss.item() * n_samples
-            z0 = outputs["modulations"].detach()
+                loss = outputs["loss"].cpu().detach()
+                fit_test_mse_in += loss.item() * n_samples
+                z0 = outputs["modulations"].detach()
 
-            if step_show and substep == 0:
-                u_pred = inr_in.modulated_forward(coords, z0)
-                with torch.no_grad():
-                    show(a_s, u_pred, coords, "test_input", num_examples=4)
+                if step_show and substep == 0:
+                    u_pred = inr_in(coords, z0)
+                    with torch.no_grad():
+                        show(a_s, u_pred, coords, "test_input", num_examples=4)
+            if optim_out:
+                # output
+                outputs = outer_step(
+                    inr_out,
+                    coords, # a_s
+                    u_s,
+                    inner_steps,
+                    alpha_out,
+                    is_train=False,
+                    return_reconstructions=False,
+                    gradient_checkpointing=False,
+                    use_rel_loss=use_pred_loss,
+                    loss_type="mse",
+                    modulations=torch.zeros_like(za_s),
+                )
 
-            # output
-            outputs = outer_step(
-                inr_out,
-                coords, # a_s
-                u_s,
-                inner_steps,
-                alpha_out,
-                is_train=False,
-                return_reconstructions=False,
-                gradient_checkpointing=False,
-                use_rel_loss=use_pred_loss,
-                loss_type="mse",
-                modulations=torch.zeros_like(za_s),
-            )
+                loss = outputs["loss"].cpu().detach()
+                fit_test_mse_out += loss.item() * n_samples
+                z1 = outputs["modulations"].detach()
 
-            loss = outputs["loss"].cpu().detach()
-            fit_test_mse_out += loss.item() * n_samples
-            z1 = outputs["modulations"].detach()
-
-            if use_pred_loss:
-                rel_test_mse_out += outputs["rel_loss"].item() * n_samples
+                if use_pred_loss:
+                    rel_test_mse_out += outputs["rel_loss"].item() * n_samples
 
         test_loss_in = fit_test_mse_in / (ntest)
         test_loss_out = fit_test_mse_out / (ntest)
@@ -386,24 +462,43 @@ def main(cfg: DictConfig) -> None:
                     "test_rel_loss_out": rel_test_loss_out,
                 })
 
+        if optim_out:
+            if train_loss_out < best_loss:
+                best_loss = train_loss_out
 
-        if train_loss_out < best_loss:
-            best_loss = train_loss_out
+                torch.save(
+                    {
+                        "cfg": cfg,
+                        "epoch": step,
+                        "inr_in": inr_in.state_dict(),
+                        "inr_out": inr_out.state_dict(),
+                        "optimizer_inr_in": optimizer_in.state_dict(),
+                        "optimizer_inr_out": optimizer_out.state_dict(),
+                        "loss": test_loss_out,
+                        "alpha_in": alpha_in,
+                        "alpha_out": alpha_out,
+                    },
+                    f"{RESULTS_DIR}/{run_name}.pt",
+                )
+        else:
+            if train_loss_in < best_loss:
+                best_loss = train_loss_in
 
-            torch.save(
-                {
-                    "cfg": cfg,
-                    "epoch": step,
-                    "inr_in": inr_in.state_dict(),
-                    "inr_out": inr_out.state_dict(),
-                    "optimizer_inr_in": optimizer_in.state_dict(),
-                    "optimizer_inr_out": optimizer_out.state_dict(),
-                    "loss": test_loss_out,
-                    "alpha_in": alpha_in,
-                    "alpha_out": alpha_out,
-                },
-                f"{RESULTS_DIR}/{run_name}.pt",
-            )
+                torch.save(
+                    {
+                        "cfg": cfg,
+                        "epoch": step,
+                        "inr_in": inr_in.state_dict(),
+                        "inr_out": inr_out.state_dict(),
+                        "optimizer_inr_in": optimizer_in.state_dict(),
+                        "optimizer_inr_out": optimizer_out.state_dict(),
+                        "loss": test_loss_in,
+                        "alpha_in": alpha_in,
+                        "alpha_out": alpha_out,
+                    },
+                    f"{RESULTS_DIR}/{run_name}.pt",
+                )
+
 
     return test_loss_out
 

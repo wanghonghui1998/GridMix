@@ -46,7 +46,7 @@ inr:
 
 wandb:
   entity: "wanghonghui1998"
-  project: "functa2functa"
+  project: "marble"
   name: 
   id: 
   dir: 

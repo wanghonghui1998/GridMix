@@ -1,6 +1,7 @@
 MIT License
 
 Copyright (c) 2022 LouisSerrano
+Copyright (c) 2025 LeapLabTHU
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -11,6 +12,10 @@ furnished to do so, subject to the following conditions:
 
 The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
+
+Modifications and additions made by LeapLabTHU are marked and described in the  
+accompanying documentation. These modifications are licensed under the same  
+MIT License as the original software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,

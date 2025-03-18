@@ -349,6 +349,285 @@ def get_dynamics_data_two_grid(
 
     elif dataset_name == "navier-stokes-dino":
         u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino(data_dir, seq_inter_len, seq_extra_len)
+    
+    elif dataset_name == "navier-stokes-dino-first40-T100":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_first40_T100(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-dino-mid40-T100":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_mid40_T100(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-dino-T100":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_T100(data_dir, seq_inter_len, seq_extra_len)
+    
+    elif dataset_name == "navier-stokes-dino-first40-T100-2048":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_first40_T100_2048(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-dino-mid40-T100-2048":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_mid40_T100_2048(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-dino-T100-2048":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_T100_2048(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-dino-40-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_last40_total64(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_total64(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-40-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total64(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-40-64-wonorm":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total64_wonorm(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms-f40-64-wonorm":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_first40_total64_wonorm(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-f40-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_first40_total64(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-40-60":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total60(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms-40-70":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total70(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "sst-11-22":
+        u_train, u_eval_extrapolation, u_test = get_sst_11_22(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "shallow-water-dino":
+        u_train, u_eval_extrapolation, u_test = get_shallow_water_dino(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "KS-fixed-viscosity-fixed-region":
+        u_train, u_eval_extrapolation, u_test = get_KS_fixed_viscosity_fixed_region(data_dir)
+    else:
+        raise NotImplementedError
+    
+    # u_train should be of shape (N, ..., C, T)
+    if dataset_name in ["shallow-water-dino"]:
+        grid_tr = shape2spherical_coordinates(u_train.shape[1:-2])
+        grid_tr_extra = shape2spherical_coordinates(u_eval_extrapolation.shape[1:-2])
+        grid_te = shape2spherical_coordinates(u_test.shape[1:-2])
+    
+    #elif dataset_name in ['mp-pde-burgers']:
+    #    grid_tr = shape2circular_coordinates(u_train.shape[1:-2])
+    #    grid_te = shape2circular_coordinates(u_test.shape[1:-2])
+    elif dataset_name == "KS-fixed-viscosity-fixed-region":
+        grid_tr = shape2coordinates(u_train.shape[1:-2])
+        grid_tr_extra = shape2coordinates(u_eval_extrapolation.shape[1:-2])
+        grid_te = shape2coordinates(u_test.shape[1:-2])
+
+    else:
+        grid_tr = shape2coordinates(u_train.shape[1:-2])
+        grid_tr_extra = shape2coordinates(u_eval_extrapolation.shape[1:-2])
+        grid_te = shape2coordinates(u_test.shape[1:-2])
+    if u_train_out is not None:
+        grid_tr_out = shape2coordinates(u_train_out.shape[1:-2])
+        grid_te_out = shape2coordinates(u_test_out.shape[1:-2])
+    if u_train_ext is not None:
+        grid_tr_ext = shape2coordinates(u_train_ext.shape[1:-2])
+        grid_te_ext = shape2coordinates(u_test_ext.shape[1:-2])
+
+    # grid_tr should be of shape (N, ..., input_dim)
+    # we need to artificially create a time dimension for the coordinates
+
+    grid_tr = einops.repeat(
+        grid_tr, "... -> b ... t", t=u_train.shape[-1], b=u_train.shape[0]
+    )
+    grid_tr_extra = einops.repeat(
+        grid_tr_extra, "... -> b ... t", t=u_eval_extrapolation.shape[-1], b=u_eval_extrapolation.shape[0]
+    )
+    grid_te = einops.repeat(
+        grid_te, "... -> b ... t", t=u_test.shape[-1], b=u_test.shape[0]
+    )
+
+    # import pdb; pdb.set_trace()
+    if isinstance(sub_from, int):
+        grid_tr = dynamics_subsample(grid_tr, sub_from)
+        u_train = dynamics_subsample(u_train, sub_from)
+
+    if isinstance(sub_from, int):
+        grid_tr_extra = dynamics_subsample(grid_tr_extra, sub_from)
+        u_eval_extrapolation = dynamics_subsample(u_eval_extrapolation, sub_from)
+
+    if isinstance(sub_from, int):
+        grid_te = dynamics_subsample(grid_te, sub_from)
+        u_test = dynamics_subsample(u_test, sub_from)
+
+    # if isinstance(sub_from, int):
+    #     grid_tr = dynamics_subsample(grid_tr, sub_from)
+    #     u_train = dynamics_subsample(u_train, sub_from)
+    # grid_tr_extra_mask_tr = grid_tr_extra.clone()
+    # u_eval_extrapolation_mask_tr = u_eval_extrapolation.clone()
+    # grid_te_mask_tr = grid_te.clone()
+    # u_test_mask_tr = u_test.clone()
+    # import pdb; pdb.set_trace()
+    
+    grid_tr_full = grid_tr.clone() 
+    u_train_full = u_train.clone()
+    grid_tr_extra_full = grid_tr_extra.clone()
+    u_eval_extrapolation_full = u_eval_extrapolation.clone()
+    grid_te_full = grid_te.clone()
+    u_test_full = u_test.clone() 
+    
+    if isinstance(sub_tr, int):
+        grid_tr = dynamics_subsample(grid_tr_full, sub_tr)
+        u_train = dynamics_subsample(u_train_full, sub_tr)
+
+        grid_tr_extra_in = dynamics_subsample(grid_tr_extra_full, sub_tr)
+        u_eval_extrapolation_in = dynamics_subsample(u_eval_extrapolation_full, sub_tr)
+
+        grid_te_in = dynamics_subsample(grid_te_full, sub_tr)
+        u_test_in = dynamics_subsample(u_test_full, sub_tr)
+
+    if isinstance(sub_tr, int):
+        grid_tr_extra = dynamics_subsample(grid_tr_extra_full, sub_tr)
+        u_eval_extrapolation = dynamics_subsample(u_eval_extrapolation_full, sub_tr)
+
+        grid_tr_out1 = dynamics_subsample(grid_tr_full, sub_tr)
+        u_train_out1 = dynamics_subsample(u_train_full, sub_tr)
+
+    if isinstance(sub_te, int):
+        grid_te = dynamics_subsample(grid_te_full, sub_te)
+        u_test = dynamics_subsample(u_test_full, sub_te)
+
+        grid_tr_out2 = dynamics_subsample(grid_tr_full, sub_te)
+        u_train_out2 = dynamics_subsample(u_train_full, sub_te)
+
+    if isinstance(sub_tr, float) and (sub_tr < 1):
+        if same_grid:
+            # import pdb; pdb.set_trace()
+            tmp = einops.rearrange(u_train, "b ... c t -> b (...) c t")
+            num_points = tmp.shape[1]
+            # torch.manual_seed(0)
+            perm = torch.randperm(num_points)
+            # print(perm[:10])
+            mask_tr = perm[: int(sub_tr * len(perm))].clone().sort()[0]
+            grid_tr = dynamics_subsample(grid_tr_full, mask_tr)
+            u_train = dynamics_subsample(u_train_full, mask_tr)
+
+            grid_tr_extra_in = dynamics_subsample(grid_tr_extra_full, mask_tr)
+            u_eval_extrapolation_in = dynamics_subsample(u_eval_extrapolation_full, mask_tr)
+
+            grid_te_in = dynamics_subsample(grid_te_full, mask_tr)
+            u_test_in = dynamics_subsample(u_test_full, mask_tr)
+
+        else:
+            print("computing different grids")
+            # u_train, grid_tr, perm = dynamics_different_subsample(
+            #     u_train, grid_tr, sub_tr
+            # )
+            u_train, grid_tr, u_eval_extrapolation_in, grid_tr_extra_in, u_test_in, grid_te_in, perm = dynamics_different_subsample_two_grid(
+                u_train_full, grid_tr_full, sub_tr, u_eval_extrapolation_full, grid_tr_extra_full, u_test_full, grid_te_full
+            )
+
+    if isinstance(sub_tr, float) and (sub_tr < 1):
+        if same_grid:
+            tmp = einops.rearrange(u_eval_extrapolation, "b ... c t -> b (...) c t")
+            num_points = tmp.shape[1]
+            perm = torch.randperm(num_points)
+            mask_tr_eval = perm[: int(sub_tr * len(perm))].clone().sort()[0]
+            # debug
+            # grid_tr_extra_mask_tr = dynamics_subsample(grid_tr_extra, mask_tr)
+            # u_eval_extrapolation_mask_tr = dynamics_subsample(u_eval_extrapolation, mask_tr)
+
+            grid_tr_extra = dynamics_subsample(grid_tr_extra_full, mask_tr_eval)
+            u_eval_extrapolation = dynamics_subsample(u_eval_extrapolation_full, mask_tr_eval)
+
+            grid_tr_out1 = dynamics_subsample(grid_tr_full, mask_tr_eval)
+            u_train_out1 = dynamics_subsample(u_train_full, mask_tr_eval)
+
+        else:
+            # u_eval_extrapolation, grid_tr_extra, perm = dynamics_different_subsample(
+            #     u_eval_extrapolation, grid_tr_extra, sub_tr
+            # )
+            u_eval_extrapolation, grid_tr_extra, u_train_out1, grid_tr_out1, _, _, perm = dynamics_different_subsample_two_grid(
+                u_eval_extrapolation_full, grid_tr_extra_full, sub_tr, u_train_full, grid_tr_full, None, None
+            )
+
+    if isinstance(sub_te, float) and (sub_te < 1):
+        if same_grid:
+            tmp = einops.rearrange(u_test, "b ... c t -> b (...) c t")
+            num_points = tmp.shape[1]
+            perm = torch.randperm(num_points)
+            mask_te = perm[: int(sub_te * len(perm))].clone().sort()[0]
+            # debug
+            # grid_te_mask_tr = dynamics_subsample(grid_te, mask_tr)
+            # u_test_mask_tr = dynamics_subsample(u_test, mask_tr)
+
+            grid_te = dynamics_subsample(grid_te_full, mask_te)
+            u_test = dynamics_subsample(u_test_full, mask_te)
+
+            grid_tr_out2 = dynamics_subsample(grid_tr_full, mask_te)
+            u_train_out2 = dynamics_subsample(u_train_full, mask_te)
+
+        else:
+            # u_test, grid_te, perm = dynamics_different_subsample(
+            #     u_test, grid_te, sub_te
+            # )
+            u_test, grid_te, u_train_out2, grid_tr_out2, _, _, perm = dynamics_different_subsample_two_grid(
+                u_test_full, grid_te_full, sub_te, u_train_full, grid_tr_full, None, None
+            )
+
+    return u_train, u_train_out1, u_train_out2, u_eval_extrapolation, u_eval_extrapolation_in, u_test, u_test_in, grid_tr, grid_tr_out1, grid_tr_out2, grid_tr_extra, grid_tr_extra_in, grid_te, grid_te_in
+    # return u_train, u_eval_extrapolation, u_test, u_eval_extrapolation_mask_tr, u_test_mask_tr, grid_tr, grid_tr_extra, grid_te, grid_tr_extra_mask_tr, grid_te_mask_tr
+
+def get_dynamics_data_three_grid(
+    data_dir,
+    dataset_name,
+    ntrain,
+    ntest,
+    seq_inter_len = 20, 
+    seq_extra_len = 20,
+    sub_from=1,
+    sub_tr=1,
+    sub_te=1,
+    same_grid=True,
+):
+    """Get training and test data as well as associated coordinates, depending on the dataset name.
+
+    Args:
+        data_dir (str): path to the dataset directory
+        dataset_name (str): dataset name (e.g. "navier-stokes)
+        ntrain (int): number of training samples
+        ntest (int): number of test samples
+        sub_tr (int or float, optional): when set to int > 1, subsamples x as x[::sub_tr]. When set to float < 1, subsamples x as x[index] where index is a random index of shape int(sub_tr*len(x)). Defaults to 1.
+        sub_tr (int or float, optional): when set to int > 1, subsamples x as x[::sub_te]. When set to float < 1, subsamples x as x[index] where index is a random index of shape int(sub_te*len(x)). Defaults to 1.
+        same_grid (bool, optional): If True, all the trajectories avec the same grids.
+    
+    Raises:
+        NotImplementedError: _description_
+
+    Returns:
+        u_train (torch.Tensor): (ntrain, ..., T)
+        u_test (torch.Tensor): (ntest, ..., T)
+        grid_tr (torch.Tensor): coordinates of u_train
+        grid_te (torch.Tensor): coordinates of u_test
+    """
+
+    data_dir = Path(data_dir)
+
+    u_train_out = None
+    u_test_out = None
+    u_train_ext = None
+    u_test_ext = None
+    grid_tr_out = None
+    grid_te_out = None
+    grid_tr_ext = None
+    grid_te_ext = None
+
+    if dataset_name == "navier-stokes-1e-3":
+        u_train, u_test = get_navier_stokes_fno(
+            data_dir / "ns_V1e-3_N5000_T50.mat")
+
+    elif dataset_name == "navier-stokes-1e-4":
+        u_train, u_test = get_navier_stokes_fno(
+            data_dir / "ns_V1e-4_N10000_T30.mat")
+
+    elif dataset_name == "navier-stokes-1e-5":
+        index_start = 9
+        u_train, u_test = get_navier_stokes_fno(
+            data_dir / "fno" / "NavierStokes_V1e-5_N1200_T20.mat", 1000, 200, sequence_length, index_start
+        )
+
+    elif dataset_name == "navier-stokes-dino":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino(data_dir, seq_inter_len, seq_extra_len)
 
     elif dataset_name == "navier-stokes-dino-40-64":
         u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_last40_total64(data_dir, seq_inter_len, seq_extra_len)
@@ -489,8 +768,11 @@ def get_dynamics_data_two_grid(
 
         else:
             print("computing different grids")
-            u_train, grid_tr, perm = dynamics_different_subsample(
-                u_train, grid_tr, sub_tr
+            # u_train, grid_tr, perm = dynamics_different_subsample(
+            #     u_train, grid_tr, sub_tr
+            # )
+            u_train, grid_tr, u_eval_extrapolation_in, grid_tr_extra_in, u_test_in, grid_te_in, perm = dynamics_different_subsample_two_grid(
+                u_train_full, grid_tr_full, sub_tr, u_eval_extrapolation_full, grid_tr_extra_full, u_test_full, grid_te_full
             )
 
     if isinstance(sub_tr, float) and (sub_tr < 1):
@@ -510,8 +792,11 @@ def get_dynamics_data_two_grid(
             u_train_out1 = dynamics_subsample(u_train_full, mask_tr_eval)
 
         else:
-            u_eval_extrapolation, grid_tr_extra, perm = dynamics_different_subsample(
-                u_eval_extrapolation, grid_tr_extra, sub_tr
+            # u_eval_extrapolation, grid_tr_extra, perm = dynamics_different_subsample(
+            #     u_eval_extrapolation, grid_tr_extra, sub_tr
+            # )
+            u_eval_extrapolation, grid_tr_extra, u_train_out1, grid_tr_out1, _, _, perm = dynamics_different_subsample_two_grid(
+                u_eval_extrapolation_full, grid_tr_extra_full, sub_tr, u_train_full, grid_tr_full, None, None
             )
 
     if isinstance(sub_te, float) and (sub_te < 1):
@@ -531,15 +816,257 @@ def get_dynamics_data_two_grid(
             u_train_out2 = dynamics_subsample(u_train_full, mask_te)
 
         else:
-            u_test, grid_te, perm = dynamics_different_subsample(
-                u_test, grid_te, sub_te
+            # u_test, grid_te, perm = dynamics_different_subsample(
+            #     u_test, grid_te, sub_te
+            # )
+            u_test, grid_te, u_train_out2, grid_tr_out2, _, _, perm = dynamics_different_subsample_two_grid(
+                u_test_full, grid_te_full, sub_te, u_train_full, grid_tr_full, None, None
             )
 
-    return u_train, u_train_out1, u_train_out2, u_eval_extrapolation, u_eval_extrapolation_in, u_test, u_test_in, grid_tr, grid_tr_out1, grid_tr_out2, grid_tr_extra, grid_tr_extra_in, grid_te, grid_te_in
+    
+    return u_train, u_train_out1, u_train_out2, u_eval_extrapolation, u_eval_extrapolation_in, u_test, u_test_in, grid_tr, grid_tr_out1, grid_tr_out2, grid_tr_extra, grid_tr_extra_in, grid_te, grid_te_in, u_train_full, grid_tr_full, u_eval_extrapolation_full, grid_tr_extra_full, u_test_full, grid_te_full
     # return u_train, u_eval_extrapolation, u_test, u_eval_extrapolation_mask_tr, u_test_mask_tr, grid_tr, grid_tr_extra, grid_te, grid_tr_extra_mask_tr, grid_te_mask_tr
 
 
 def get_dynamics_data(
+    data_dir,
+    dataset_name,
+    ntrain,
+    ntest,
+    seq_inter_len = 20, 
+    seq_extra_len = 20,
+    sub_from=1,
+    sub_tr=1,
+    sub_te=1,
+    same_grid=True,
+):
+    """Get training and test data as well as associated coordinates, depending on the dataset name.
+
+    Args:
+        data_dir (str): path to the dataset directory
+        dataset_name (str): dataset name (e.g. "navier-stokes)
+        ntrain (int): number of training samples
+        ntest (int): number of test samples
+        sub_tr (int or float, optional): when set to int > 1, subsamples x as x[::sub_tr]. When set to float < 1, subsamples x as x[index] where index is a random index of shape int(sub_tr*len(x)). Defaults to 1.
+        sub_tr (int or float, optional): when set to int > 1, subsamples x as x[::sub_te]. When set to float < 1, subsamples x as x[index] where index is a random index of shape int(sub_te*len(x)). Defaults to 1.
+        same_grid (bool, optional): If True, all the trajectories avec the same grids.
+    
+    Raises:
+        NotImplementedError: _description_
+
+    Returns:
+        u_train (torch.Tensor): (ntrain, ..., T)
+        u_test (torch.Tensor): (ntest, ..., T)
+        grid_tr (torch.Tensor): coordinates of u_train
+        grid_te (torch.Tensor): coordinates of u_test
+    """
+
+    data_dir = Path(data_dir)
+
+    u_train_out = None
+    u_test_out = None
+    u_train_ext = None
+    u_test_ext = None
+    grid_tr_out = None
+    grid_te_out = None
+    grid_tr_ext = None
+    grid_te_ext = None
+
+    if dataset_name == "navier-stokes-1e-3":
+        u_train, u_test = get_navier_stokes_fno(
+            data_dir / "ns_V1e-3_N5000_T50.mat")
+
+    elif dataset_name == "navier-stokes-1e-4":
+        u_train, u_test = get_navier_stokes_fno(
+            data_dir / "ns_V1e-4_N10000_T30.mat")
+
+    elif dataset_name == "navier-stokes-1e-5":
+        index_start = 9
+        u_train, u_test = get_navier_stokes_fno(
+            data_dir / "fno" / "NavierStokes_V1e-5_N1200_T20.mat", 1000, 200, sequence_length, index_start
+        )
+
+    elif dataset_name == "navier-stokes-dino":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-dino-first40-T100":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_first40_T100(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-dino-mid40-T100":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_mid40_T100(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-dino-T100":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_T100(data_dir, seq_inter_len, seq_extra_len)
+    
+    elif dataset_name == "navier-stokes-dino-first40-T100-2048":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_first40_T100_2048(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-dino-mid40-T100-2048":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_mid40_T100_2048(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-dino-T100-2048":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_T100_2048(data_dir, seq_inter_len, seq_extra_len)
+
+
+    elif dataset_name == "navier-stokes-dino-40-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_dino_last40_total64(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_total64(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-40-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total64(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-40-64-wonorm":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total64_wonorm(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms-f40-64-wonorm":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_first40_total64_wonorm(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-f40-64":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_first40_total64(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "navier-stokes-nms-40-60":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total60(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "navier-stokes-nms-40-70":
+        u_train, u_eval_extrapolation, u_test = get_navier_stokes_nms_last40_total70(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "sst-11-22":
+        u_train, u_eval_extrapolation, u_test = get_sst_11_22(data_dir, seq_inter_len, seq_extra_len)
+
+    elif dataset_name == "shallow-water-dino":
+        u_train, u_eval_extrapolation, u_test = get_shallow_water_dino(data_dir, seq_inter_len, seq_extra_len)
+    elif dataset_name == "KS-fixed-viscosity-fixed-region":
+        u_train, u_eval_extrapolation, u_test = get_KS_fixed_viscosity_fixed_region(data_dir)
+    else:
+        raise NotImplementedError
+    
+    # u_train should be of shape (N, ..., C, T)
+    if dataset_name in ["shallow-water-dino"]:
+        grid_tr = shape2spherical_coordinates(u_train.shape[1:-2])
+        grid_tr_extra = shape2spherical_coordinates(u_eval_extrapolation.shape[1:-2])
+        grid_te = shape2spherical_coordinates(u_test.shape[1:-2])
+    
+    elif dataset_name == "KS-fixed-viscosity-fixed-region":
+        grid_tr = shape2coordinates(u_train.shape[1:-2])
+        grid_tr_extra = shape2coordinates(u_eval_extrapolation.shape[1:-2])
+        grid_te = shape2coordinates(u_test.shape[1:-2])
+    #elif dataset_name in ['mp-pde-burgers']:
+    #    grid_tr = shape2circular_coordinates(u_train.shape[1:-2])
+    #    grid_te = shape2circular_coordinates(u_test.shape[1:-2])
+
+    else:
+        grid_tr = shape2coordinates(u_train.shape[1:-2])
+        grid_tr_extra = shape2coordinates(u_eval_extrapolation.shape[1:-2])
+        grid_te = shape2coordinates(u_test.shape[1:-2])
+    if u_train_out is not None:
+        grid_tr_out = shape2coordinates(u_train_out.shape[1:-2])
+        grid_te_out = shape2coordinates(u_test_out.shape[1:-2])
+    if u_train_ext is not None:
+        grid_tr_ext = shape2coordinates(u_train_ext.shape[1:-2])
+        grid_te_ext = shape2coordinates(u_test_ext.shape[1:-2])
+
+    # grid_tr should be of shape (N, ..., input_dim)
+    # we need to artificially create a time dimension for the coordinates
+
+    grid_tr = einops.repeat(
+        grid_tr, "... -> b ... t", t=u_train.shape[-1], b=u_train.shape[0]
+    )
+    grid_tr_extra = einops.repeat(
+        grid_tr_extra, "... -> b ... t", t=u_eval_extrapolation.shape[-1], b=u_eval_extrapolation.shape[0]
+    )
+    grid_te = einops.repeat(
+        grid_te, "... -> b ... t", t=u_test.shape[-1], b=u_test.shape[0]
+    )
+    # import pdb; pdb.set_trace()
+    if isinstance(sub_from, int):
+        grid_tr = dynamics_subsample(grid_tr, sub_from)
+        u_train = dynamics_subsample(u_train, sub_from)
+
+    if isinstance(sub_from, int):
+        grid_tr_extra = dynamics_subsample(grid_tr_extra, sub_from)
+        u_eval_extrapolation = dynamics_subsample(u_eval_extrapolation, sub_from)
+
+    if isinstance(sub_from, int):
+        grid_te = dynamics_subsample(grid_te, sub_from)
+        u_test = dynamics_subsample(u_test, sub_from)
+
+    # if isinstance(sub_from, int):
+    #     grid_tr = dynamics_subsample(grid_tr, sub_from)
+    #     u_train = dynamics_subsample(u_train, sub_from)
+    # grid_tr_extra_mask_tr = grid_tr_extra.clone()
+    # u_eval_extrapolation_mask_tr = u_eval_extrapolation.clone()
+    # grid_te_mask_tr = grid_te.clone()
+    # u_test_mask_tr = u_test.clone()
+    # import pdb; pdb.set_trace()
+    if isinstance(sub_tr, int):
+        grid_tr = dynamics_subsample(grid_tr, sub_tr)
+        u_train = dynamics_subsample(u_train, sub_tr)
+
+    if isinstance(sub_tr, int):
+        grid_tr_extra = dynamics_subsample(grid_tr_extra, sub_tr)
+        u_eval_extrapolation = dynamics_subsample(u_eval_extrapolation, sub_tr)
+
+    if isinstance(sub_te, int):
+        grid_te = dynamics_subsample(grid_te, sub_te)
+        u_test = dynamics_subsample(u_test, sub_te)
+
+    if isinstance(sub_tr, float) and (sub_tr < 1):
+        if same_grid:
+            # import pdb; pdb.set_trace()
+            tmp = einops.rearrange(u_train, "b ... c t -> b (...) c t")
+            num_points = tmp.shape[1]
+            # torch.manual_seed(0)
+            perm = torch.randperm(num_points)
+            # print(perm[:10])
+            mask_tr = perm[: int(sub_tr * len(perm))].clone().sort()[0]
+            grid_tr = dynamics_subsample(grid_tr, mask_tr)
+            u_train = dynamics_subsample(u_train, mask_tr)
+
+        else:
+            print("computing different grids")
+            u_train, grid_tr, perm = dynamics_different_subsample(
+                u_train, grid_tr, sub_tr
+            )
+
+    if isinstance(sub_tr, float) and (sub_tr < 1):
+        if same_grid:
+            tmp = einops.rearrange(u_eval_extrapolation, "b ... c t -> b (...) c t")
+            num_points = tmp.shape[1]
+            perm = torch.randperm(num_points)
+            mask_tr_eval = perm[: int(sub_tr * len(perm))].clone().sort()[0]
+            # debug
+            # grid_tr_extra_mask_tr = dynamics_subsample(grid_tr_extra, mask_tr)
+            # u_eval_extrapolation_mask_tr = dynamics_subsample(u_eval_extrapolation, mask_tr)
+
+            grid_tr_extra = dynamics_subsample(grid_tr_extra, mask_tr_eval)
+            u_eval_extrapolation = dynamics_subsample(u_eval_extrapolation, mask_tr_eval)
+
+        else:
+            u_eval_extrapolation, grid_tr_extra, perm = dynamics_different_subsample(
+                u_eval_extrapolation, grid_tr_extra, sub_tr
+            )
+
+    if isinstance(sub_te, float) and (sub_te < 1):
+        if same_grid:
+            tmp = einops.rearrange(u_test, "b ... c t -> b (...) c t")
+            num_points = tmp.shape[1]
+            perm = torch.randperm(num_points)
+            mask_te = perm[: int(sub_te * len(perm))].clone().sort()[0]
+            # debug
+            # grid_te_mask_tr = dynamics_subsample(grid_te, mask_tr)
+            # u_test_mask_tr = dynamics_subsample(u_test, mask_tr)
+
+            grid_te = dynamics_subsample(grid_te, mask_te)
+            u_test = dynamics_subsample(u_test, mask_te)
+
+        else:
+            u_test, grid_te, perm = dynamics_different_subsample(
+                u_test, grid_te, sub_te
+            )
+
+    return u_train, u_eval_extrapolation, u_test, grid_tr, grid_tr_extra, grid_te
+    # return u_train, u_eval_extrapolation, u_test, u_eval_extrapolation_mask_tr, u_test_mask_tr, grid_tr, grid_tr_extra, grid_te, grid_tr_extra_mask_tr, grid_te_mask_tr
+
+
+def get_dynamics_data_with_full_data(
     data_dir,
     dataset_name,
     ntrain,
@@ -677,7 +1204,8 @@ def get_dynamics_data(
     if isinstance(sub_from, int):
         grid_te = dynamics_subsample(grid_te, sub_from)
         u_test = dynamics_subsample(u_test, sub_from)
-
+    full_grid_te = grid_te.clone()
+    full_u_test = u_test.clone()
     # if isinstance(sub_from, int):
     #     grid_tr = dynamics_subsample(grid_tr, sub_from)
     #     u_train = dynamics_subsample(u_train, sub_from)
@@ -751,10 +1279,9 @@ def get_dynamics_data(
             u_test, grid_te, perm = dynamics_different_subsample(
                 u_test, grid_te, sub_te
             )
-
-    return u_train, u_eval_extrapolation, u_test, grid_tr, grid_tr_extra, grid_te
-    # return u_train, u_eval_extrapolation, u_test, u_eval_extrapolation_mask_tr, u_test_mask_tr, grid_tr, grid_tr_extra, grid_te, grid_tr_extra_mask_tr, grid_te_mask_tr
-
+# full_grid_te = grid_te.clone()
+#     full_u_test = u_test.clone()
+    return u_train, u_eval_extrapolation, u_test, grid_tr, grid_tr_extra, grid_te, full_u_test, full_grid_te
 
 def get_dynamics_data_extra_grid(
     data_dir,
@@ -1114,9 +1641,9 @@ def get_pipe(filename, ntrain, ntest, min_sub=1):
 
     # Data is of the shape (number of samples = 2048, grid size = 2^13)
 
-    INPUT_X = os.path.join(filename, "../pipe/Pipe_X.npy")
-    INPUT_Y = os.path.join(filename, "../pipe/Pipe_Y.npy")
-    OUTPUT_Sigma = os.path.join(filename, "../pipe/Pipe_Q.npy")
+    INPUT_X = os.path.join(filename, "pipe/Pipe_X.npy")
+    INPUT_Y = os.path.join(filename, "pipe/Pipe_Y.npy")
+    OUTPUT_Sigma = os.path.join(filename, "pipe/Pipe_Q.npy")
 
     N = ntrain + ntest
     r1 = min_sub
@@ -1193,10 +1720,10 @@ def get_airfoil(filename, ntrain, ntest, min_sub=1):
 
     # Data is of the shape (number of samples = 2048, grid size = 2^13)
 
-    INPUT_X = os.path.join(filename, "../airfoil/naca/NACA_Cylinder_X.npy")
-    INPUT_Y = os.path.join(filename, "../airfoil/naca/NACA_Cylinder_Y.npy")
+    INPUT_X = os.path.join(filename, "airfoil/naca/NACA_Cylinder_X.npy")
+    INPUT_Y = os.path.join(filename, "airfoil/naca/NACA_Cylinder_Y.npy")
     OUTPUT_Sigma = os.path.join(
-        filename, "../airfoil/naca/NACA_Cylinder_Q.npy")
+        filename, "airfoil/naca/NACA_Cylinder_Q.npy")
 
     r1 = min_sub
     r2 = min_sub
@@ -1248,11 +1775,11 @@ def get_airfoil(filename, ntrain, ntest, min_sub=1):
 
 def get_elasticity(filename, ntrain, ntest, min_sub=1):
     PATH_Sigma = os.path.join(
-        filename, "../elasticity/Random_UnitCell_sigma_10.npy")
-    PATH_XY = os.path.join(filename, "../elasticity/Random_UnitCell_XY_10.npy")
-    PATH_rr = os.path.join(filename, "../elasticity/Random_UnitCell_rr_10.npy")
+        filename, "elasticity/Meshes/Random_UnitCell_sigma_10.npy")
+    PATH_XY = os.path.join(filename, "elasticity/Meshes/Random_UnitCell_XY_10.npy")
+    PATH_rr = os.path.join(filename, "elasticity/Meshes/Random_UnitCell_rr_10.npy")
     PATH_theta = os.path.join(
-        filename, "../elasticity/Random_UnitCell_theta_10.npy")
+        filename, "elasticity/Meshes/Random_UnitCell_theta_10.npy")
 
     input_rr = np.load(PATH_rr)
     input_rr = torch.tensor(input_rr, dtype=torch.float).permute(1, 0)
@@ -1762,6 +2289,32 @@ def get_navier_stokes_nms_last40_total70(filename, seq_inter_len=20, seq_extra_l
 
     return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
 
+def get_KS_fixed_viscosity_fixed_region(filename, seq_inter_len=20, seq_extra_len=20):
+    # train_path = str(filename) + "/dino/navier_1e-3_256_2_train.shelve"
+    # test_path = str(filename) + "/dino/navier_1e-3_256_2_test.shelve"
+
+    train_path = str(filename) + '/KS_train_fixed_viscosity_fixed_region.h5'
+    test_path = str(filename) + '/KS_test_fixed_viscosity_fixed_region.h5'
+    valid_path = str(filename) + '/KS_valid_fixed_viscosity_fixed_region.h5'
+
+    u_train = h5py.File(train_path, 'r')['train']['pde_140-256'][:]
+    u_valid = h5py.File(valid_path, 'r')['valid']['pde_640-256'][:]#[:, ::4]
+    u_test = h5py.File(test_path, 'r')['test']['pde_640-256'][:]#[:, ::4]
+    
+    print(u_train.shape, u_valid.shape, u_test.shape)
+    
+    u_train = torch.tensor(u_train, dtype=torch.float32).permute(0, 2, 1).unsqueeze(-2)
+    u_valid = torch.tensor(u_valid, dtype=torch.float32).permute(0, 2, 1).unsqueeze(-2)
+    u_test = torch.tensor(u_test, dtype=torch.float32).permute(0, 2, 1).unsqueeze(-2)
+
+    print(u_train.shape, u_valid.shape, u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    # return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
+    return u_train, u_valid, u_test
+    # return u_train, u_test, u_valid
+
 def get_navier_stokes_dino(filename, seq_inter_len=20, seq_extra_len=20):
     # train_path = str(filename) + "/dino/navier_1e-3_256_2_train.shelve"
     # test_path = str(filename) + "/dino/navier_1e-3_256_2_test.shelve"
@@ -1822,6 +2375,388 @@ def get_navier_stokes_dino(filename, seq_inter_len=20, seq_extra_len=20):
 
     return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
 
+
+def get_navier_stokes_dino_first40_T100(filename, seq_inter_len=20, seq_extra_len=20):
+    # train_path = str(filename) + "/dino/navier_1e-3_256_2_train.shelve"
+    # test_path = str(filename) + "/dino/navier_1e-3_256_2_test.shelve"
+
+    train_path = str(filename) + '/navier_1e-3_256_T100_train.shelve'
+    test_path = str(filename) + '/navier_1e-3_256_T100_test.shelve'
+
+    data_train = dict(shelve.open(str(train_path)))
+    data_test = dict(shelve.open(str(test_path)))
+
+    # data_train.pop("a")
+    # data_train.pop("t")
+    # data_test.pop("a")
+    # data_test.pop("t")
+
+    # concatenate dictionaries to be of shape (ntrain, 40, 256, 256)
+    #  u = einops.rearrange(u, 'b (t d) w l -> (b d) t w l', d=2)
+    u_train = torch.tensor(
+        np.concatenate(
+            list(
+                map(
+                    lambda key: np.array(data_train[key]["data"]),
+                    data_train.keys(),
+                )
+            )
+        )
+    )
+    u_test = torch.tensor(
+        np.concatenate(
+            list(
+                map(
+                    lambda key: np.array(data_test[key]["data"]),
+                    data_test.keys(),
+                )
+            )
+        )
+    )
+
+    # u_min = u_train.min()
+    # u_max = u_train.max()
+    # print(u_min, u_max, u_test.min(), u_test.max())
+
+    # if sequence_length is not None:
+    #     u_train = einops.rearrange(
+    #         u_train, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+    #     u_test = einops.rearrange(
+    #         u_test, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    u_train = u_train[..., :40]
+    u_test = u_test[..., :40]
+
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
+
+def get_navier_stokes_dino_mid40_T100(filename, seq_inter_len=20, seq_extra_len=20):
+    # train_path = str(filename) + "/dino/navier_1e-3_256_2_train.shelve"
+    # test_path = str(filename) + "/dino/navier_1e-3_256_2_test.shelve"
+
+    train_path = str(filename) + '/navier_1e-3_256_T100_train.shelve'
+    test_path = str(filename) + '/navier_1e-3_256_T100_test.shelve'
+
+    data_train = dict(shelve.open(str(train_path)))
+    data_test = dict(shelve.open(str(test_path)))
+
+    # data_train.pop("a")
+    # data_train.pop("t")
+    # data_test.pop("a")
+    # data_test.pop("t")
+
+    # concatenate dictionaries to be of shape (ntrain, 40, 256, 256)
+    #  u = einops.rearrange(u, 'b (t d) w l -> (b d) t w l', d=2)
+    u_train = torch.tensor(
+        np.concatenate(
+            list(
+                map(
+                    lambda key: np.array(data_train[key]["data"]),
+                    data_train.keys(),
+                )
+            )
+        )
+    )
+    u_test = torch.tensor(
+        np.concatenate(
+            list(
+                map(
+                    lambda key: np.array(data_test[key]["data"]),
+                    data_test.keys(),
+                )
+            )
+        )
+    )
+
+    # u_min = u_train.min()
+    # u_max = u_train.max()
+    # print(u_min, u_max, u_test.min(), u_test.max())
+
+    # if sequence_length is not None:
+    #     u_train = einops.rearrange(
+    #         u_train, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+    #     u_test = einops.rearrange(
+    #         u_test, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    u_train = u_train[..., 30:70]
+    u_test = u_test[..., 30:70]
+    
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
+
+
+def get_navier_stokes_dino_T100(filename, seq_inter_len=20, seq_extra_len=20):
+    # train_path = str(filename) + "/dino/navier_1e-3_256_2_train.shelve"
+    # test_path = str(filename) + "/dino/navier_1e-3_256_2_test.shelve"
+
+    train_path = str(filename) + '/navier_1e-3_256_T100_train.shelve'
+    test_path = str(filename) + '/navier_1e-3_256_T100_test.shelve'
+
+    data_train = dict(shelve.open(str(train_path)))
+    data_test = dict(shelve.open(str(test_path)))
+
+    # data_train.pop("a")
+    # data_train.pop("t")
+    # data_test.pop("a")
+    # data_test.pop("t")
+
+    # concatenate dictionaries to be of shape (ntrain, 40, 256, 256)
+    #  u = einops.rearrange(u, 'b (t d) w l -> (b d) t w l', d=2)
+    u_train = torch.tensor(
+        np.concatenate(
+            list(
+                map(
+                    lambda key: np.array(data_train[key]["data"]),
+                    data_train.keys(),
+                )
+            )
+        )
+    )
+    u_test = torch.tensor(
+        np.concatenate(
+            list(
+                map(
+                    lambda key: np.array(data_test[key]["data"]),
+                    data_test.keys(),
+                )
+            )
+        )
+    )
+
+    # u_min = u_train.min()
+    # u_max = u_train.max()
+    # print(u_min, u_max, u_test.min(), u_test.max())
+
+    # if sequence_length is not None:
+    #     u_train = einops.rearrange(
+    #         u_train, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+    #     u_test = einops.rearrange(
+    #         u_test, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    # u_train = u_train[..., 30:70]
+    # u_test = u_test[..., 30:70]
+    
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 100)
+
+
+
+def get_navier_stokes_dino_first40_T100_2048(filename, seq_inter_len=20, seq_extra_len=20):
+    # train_path = str(filename) + "/dino/navier_1e-3_256_2_train.shelve"
+    # test_path = str(filename) + "/dino/navier_1e-3_256_2_test.shelve"
+
+    train_path = str(filename) + '/navier_1e-3_2048_T100_train.shelve'
+    test_path = str(filename) + '/navier_1e-3_256_T100_test.shelve'
+
+    data_train = dict(shelve.open(str(train_path)))
+    data_test = dict(shelve.open(str(test_path)))
+
+    # data_train.pop("a")
+    # data_train.pop("t")
+    # data_test.pop("a")
+    # data_test.pop("t")
+
+    # concatenate dictionaries to be of shape (ntrain, 40, 256, 256)
+    #  u = einops.rearrange(u, 'b (t d) w l -> (b d) t w l', d=2)
+    u_train = torch.tensor(
+        np.concatenate(
+            list(
+                map(
+                    lambda key: np.array(data_train[key]["data"][:, :40, ::4, ::4]),
+                    data_train.keys(),
+                )
+            )
+        )
+    )
+    u_test = torch.tensor(
+        np.concatenate(
+            list(
+                map(
+                    lambda key: np.array(data_test[key]["data"][:, :40, ::4, ::4]),
+                    data_test.keys(),
+                )
+            )
+        )
+    )
+
+    # u_min = u_train.min()
+    # u_max = u_train.max()
+    # print(u_min, u_max, u_test.min(), u_test.max())
+
+    # if sequence_length is not None:
+    #     u_train = einops.rearrange(
+    #         u_train, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+    #     u_test = einops.rearrange(
+    #         u_test, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    # u_train = u_train[..., :40]
+    # u_test = u_test[..., :40]
+
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
+
+def get_navier_stokes_dino_mid40_T100_2048(filename, seq_inter_len=20, seq_extra_len=20):
+    # train_path = str(filename) + "/dino/navier_1e-3_256_2_train.shelve"
+    # test_path = str(filename) + "/dino/navier_1e-3_256_2_test.shelve"
+
+    train_path = str(filename) + '/navier_1e-3_2048_T100_train.shelve'
+    test_path = str(filename) + '/navier_1e-3_256_T100_test.shelve'
+
+    data_train = dict(shelve.open(str(train_path)))
+    data_test = dict(shelve.open(str(test_path)))
+
+    # data_train.pop("a")
+    # data_train.pop("t")
+    # data_test.pop("a")
+    # data_test.pop("t")
+
+    # concatenate dictionaries to be of shape (ntrain, 40, 256, 256)
+    #  u = einops.rearrange(u, 'b (t d) w l -> (b d) t w l', d=2)
+    u_train = torch.tensor(
+        np.concatenate(
+            list(
+                map(
+                    lambda key: np.array(data_train[key]["data"][:, 30:70, ::4, ::4]),
+                    data_train.keys(),
+                )
+            )
+        )
+    )
+    u_test = torch.tensor(
+        np.concatenate(
+            list(
+                map(
+                    lambda key: np.array(data_test[key]["data"][:, 30:70, ::4, ::4]),
+                    data_test.keys(),
+                )
+            )
+        )
+    )
+
+    # u_min = u_train.min()
+    # u_max = u_train.max()
+    # print(u_min, u_max, u_test.min(), u_test.max())
+
+    # if sequence_length is not None:
+    #     u_train = einops.rearrange(
+    #         u_train, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+    #     u_test = einops.rearrange(
+    #         u_test, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    # u_train = u_train[..., 30:70]
+    # u_test = u_test[..., 30:70]
+    
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 40)
+
+
+def get_navier_stokes_dino_T100_2048(filename, seq_inter_len=20, seq_extra_len=20):
+    # train_path = str(filename) + "/dino/navier_1e-3_256_2_train.shelve"
+    # test_path = str(filename) + "/dino/navier_1e-3_256_2_test.shelve"
+
+    train_path = str(filename) + '/navier_1e-3_2048_T100_train.shelve'
+    test_path = str(filename) + '/navier_1e-3_256_T100_test.shelve'
+
+    data_train = dict(shelve.open(str(train_path)))
+    data_test = dict(shelve.open(str(test_path)))
+
+    # data_train.pop("a")
+    # data_train.pop("t")
+    # data_test.pop("a")
+    # data_test.pop("t")
+
+    # concatenate dictionaries to be of shape (ntrain, 40, 256, 256)
+    #  u = einops.rearrange(u, 'b (t d) w l -> (b d) t w l', d=2)
+    u_train = torch.tensor(
+        np.concatenate(
+            list(
+                map(
+                    lambda key: np.array(data_train[key]["data"]),
+                    data_train.keys(),
+                )
+            )
+        )
+    )
+    u_test = torch.tensor(
+        np.concatenate(
+            list(
+                map(
+                    lambda key: np.array(data_test[key]["data"]),
+                    data_test.keys(),
+                )
+            )
+        )
+    )
+
+    # u_min = u_train.min()
+    # u_max = u_train.max()
+    # print(u_min, u_max, u_test.min(), u_test.max())
+
+    # if sequence_length is not None:
+    #     u_train = einops.rearrange(
+    #         u_train, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+    #     u_test = einops.rearrange(
+    #         u_test, "b (d t) w h -> (b d) t w h", t=sequence_length
+    #     )
+
+    u_train = einops.rearrange(u_train, "b t w h -> b w h t").unsqueeze(-2)
+    u_test = einops.rearrange(u_test, "b t w h -> b w h t").unsqueeze(-2)
+
+    # u_train = u_train[..., 30:70]
+    # u_test = u_test[..., 30:70]
+    
+    print(u_train.shape)
+    print(u_test.shape)
+
+    # output of shape (N, Dx, Dy, 1, T)
+
+    return split_data(u_train, u_test, seq_inter_len, seq_extra_len, 100)
 
 def get_navier_stokes_dino_last40_total64(filename, seq_inter_len=20, seq_extra_len=20):
    
@@ -1899,8 +2834,8 @@ def split_data(u_train, u_test, seq_inter_len, seq_extra_len, total_seq):
 
 
 def get_shallow_water_dino(filename, seq_inter_len = 20, seq_extra_len = 20):
-    train_path = str(filename) + "/dino/shallow_water_16_160_128_256_train.h5"
-    test_path = str(filename) + "/dino/shallow_water_2_160_128_256_test.h5"
+    train_path = str(filename) + "/shallow_water_16_160_128_256_train.h5"
+    test_path = str(filename) + "/shallow_water_2_160_128_256_test.h5"
 
     with h5py.File(train_path, "r") as f:
         vorticity_train = f["vorticity"][()]
@@ -1910,6 +2845,29 @@ def get_shallow_water_dino(filename, seq_inter_len = 20, seq_extra_len = 20):
         vorticity_test = f["vorticity"][()]
         height_test = f["height"][()]
 
+    # train_path = os.path.join(str(filename),"shallow_water_train")
+    # test_path = os.path.join(str(filename),"shallow_water_test")
+
+    # vorticity_train = []
+    # height_train = []
+    # for traj_id in range(8):
+    #     with h5py.File(os.path.join(train_path, f'traj_{traj_id:04d}.h5'), "r") as f:
+    #         vorticity_train.append(f["tasks/vorticity"][()])
+    #         height_train.append(f["tasks/height"][()])
+    # vorticity_train = np.stack(vorticity_train)
+    # height_train = np.stack(height_train)
+
+    # vorticity_test = []
+    # height_test = []
+    # for traj_id in range(2):
+    #     with h5py.File(os.path.join(test_path, f'traj_{traj_id:04d}.h5'), "r") as f:
+    #         vorticity_test.append(f["tasks/vorticity"][()])
+    #         height_test.append(f["tasks/height"][()])
+    # vorticity_test = np.stack(vorticity_test)
+    # height_test = np.stack(height_test)
+
+    print(f'train {vorticity_train.shape}, {height_train.shape}')
+    print(f'test {vorticity_test.shape}, {height_test.shape}')
     # shape (N, T, long, lat)
     # train shape (16, 160, 256, 128)
     # test shape (2, 160, 256, 128)
@@ -2134,6 +3092,58 @@ def dynamics_different_subsample(u, grid, draw_ratio):
 
     return small_u, small_grid, permutations
 
+def dynamics_different_subsample_two_grid(u, grid, draw_ratio, u1=None, g1=None, u2=None, g2=None):
+    """
+    Performs subsampling for univariate time series
+    Args:
+        u (torch.Tensor): univariate time series (batch_size, num_points, num_channels, T)
+        grid (torch.Tensor): timesteps coordinates (batch_size, num_points, input_dim)
+        draw_ratio (float): draw ratio
+    Returns:
+        small_data: subsampled data
+        small_grid: subsampled grid
+        permutations: draw indexs
+    """
+    u = einops.rearrange(u, "b ... c t -> b (...) c t")
+    grid = einops.rearrange(grid, "b ... c t -> b (...) c t")
+
+    N = u.shape[0]
+    C = u.shape[-2]
+    dims = grid.shape[-2]
+    T = u.shape[-1]
+    input_dim = grid.shape[-2]
+    partial_grid_size = int(draw_ratio * grid.shape[1])
+    
+    # Create draw indexes
+    permutations = [
+        torch.randperm(grid.shape[1])[:partial_grid_size].unsqueeze(0)
+        for ii in range(N)
+    ]
+    permutations = torch.cat(permutations, axis=0)
+    small_u = torch.gather(u, 1, permutations.unsqueeze(-1).unsqueeze(-1).repeat( 1, 1, C, T))
+    small_grid = torch.gather(grid, 1, permutations.unsqueeze(-1).unsqueeze(-1).repeat( 1, 1, dims, T))
+
+    small_u1 = None 
+    small_g1 = None 
+    small_u2 = None 
+    small_g2 = None 
+
+    if u1 is not None:
+        u1 = einops.rearrange(u1, "b ... c t -> b (...) c t")
+        g1 = einops.rearrange(g1, "b ... c t -> b (...) c t")
+        T1 = u1.shape[-1]
+        N1 = u1.shape[0]
+        small_u1 = torch.gather(u1, 1, permutations[0:1].unsqueeze(-1).unsqueeze(-1).repeat( N1, 1, C, T1))
+        small_g1 = torch.gather(g1, 1, permutations[0:1].unsqueeze(-1).unsqueeze(-1).repeat( N1, 1, dims, T1))
+    if u2 is not None:
+        u2 = einops.rearrange(u2, "b ... c t -> b (...) c t")
+        g2 = einops.rearrange(g2, "b ... c t -> b (...) c t")
+        T2 = u2.shape[-1]
+        N2 = u2.shape[0]
+        small_u2 = torch.gather(u2, 1, permutations[0:1].unsqueeze(-1).unsqueeze(-1).repeat( N2, 1, C, T2))
+        small_g2 = torch.gather(g2, 1, permutations[0:1].unsqueeze(-1).unsqueeze(-1).repeat( N2, 1, dims, T2))
+
+    return small_u, small_grid, small_u1, small_g1, small_u2, small_g2, permutations
 
 def shape2coordinates(spatial_shape, max_value=1.0):
     """Create coordinates from a spatial shape.
@@ -2193,6 +3203,10 @@ def shape2spherical_coordinates(spatial_shape):
     coordinates[..., 0] = torch.cos(lat_rad) * torch.cos(long_rad)
     coordinates[..., 1] = torch.cos(lat_rad) * torch.sin(long_rad)
     coordinates[..., 2] = torch.sin(lat_rad)
+    
+    long_rad = (long_rad-long_rad.min()) / (long_rad.max()-long_rad.min())
+    lat_rad = (lat_rad-lat_rad.min()) / (lat_rad.max()-lat_rad.min())
+    coordinates = torch.cat([coordinates, lat_rad.unsqueeze(-1), long_rad.unsqueeze(-1)], dim=-1)
     return coordinates
 
 

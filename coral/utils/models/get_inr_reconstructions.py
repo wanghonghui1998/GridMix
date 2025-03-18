@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 from coral.utils.data.dynamics_dataset import KEY_TO_INDEX
-# from coral.utils.data.graph_dataset import KEY_TO_INDEX as GRAPH_KEY_TO_INDEX
+from coral.utils.data.graph_dataset import KEY_TO_INDEX as GRAPH_KEY_TO_INDEX
 
 
 def get_reconstructions(inr, coords, modulations, z_mean, z_std, dataset_name=None):
@@ -23,7 +23,7 @@ def get_reconstructions(inr, coords, modulations, z_mean, z_std, dataset_name=No
         z_m = z_mean.repeat(n_samples*T, 1, 1).squeeze().cuda()
         z_s = z_std.repeat(n_samples*T, 1, 1).squeeze().cuda()
         with torch.no_grad():
-            predictions = inr.modulated_forward(coords, modulations * z_s + z_m)
+            predictions = inr(coords, modulations * z_s + z_m)
             predictions = einops.rearrange(predictions, "(b t) ... -> b ... t", t=T)
         return predictions
     elif type(inr) == dict:
@@ -38,7 +38,7 @@ def get_reconstructions(inr, coords, modulations, z_mean, z_std, dataset_name=No
 
             with torch.no_grad():
                 for t in range(T):
-                    pred = inr_model.modulated_forward(
+                    pred = inr_model(
                         coords[..., t], modulations[..., idx, t] * z_s + z_m
                     )
                     predictions[..., idx, t] = pred.squeeze()
@@ -66,7 +66,7 @@ def get_reconstructions(inr, coords, modulations, z_mean, z_std, dataset_name=No
 #             #print('z_m', z_m.shape, z_s.shape)
 
 #             with torch.no_grad():
-#                 pred = inr_model.modulated_forward(
+#                 pred = inr_model(
 #                     coords, modulations[batch, :, idx] * z_s + z_m
 #                 )
 #                 predictions[..., idx] = pred.squeeze()

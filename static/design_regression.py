@@ -14,7 +14,7 @@ from coral.mfn import FourierNet, HyperMAGNET, HyperMultiscaleBACON
 from coral.mlp import MLP, Derivative, ResNet
 from coral.siren import ModulatedSiren
 from coral.utils.data.load_data import set_seed
-from coral.utils.plot import show
+from coral.utils.plot import show, write_elasticity
 from coral.utils.data.load_data import get_operator_data
 from coral.utils.data.operator_dataset import OperatorDataset
 from coral.utils.models.load_inr import create_inr_instance
@@ -26,7 +26,7 @@ from coral.utils.data.load_modulations import load_operator_modulations
 import warnings
 warnings.filterwarnings('ignore', category=UserWarning, message='TypedStorage is deprecated')
 
-@hydra.main(config_path="../config/static/", config_name="regression.yaml")
+@hydra.main(config_path="config/static/", config_name="regression.yaml")
 def main(cfg: DictConfig) -> None:
     torch.set_default_dtype(torch.float32)
     
@@ -54,6 +54,7 @@ def main(cfg: DictConfig) -> None:
 
     # inr
     load_run_name = cfg.inr.run_name
+    load_run_name_in = cfg.inr.run_name_in
     inner_steps = cfg.inr.inner_steps
 
     # model
@@ -106,11 +107,17 @@ def main(cfg: DictConfig) -> None:
     os.makedirs(str(model_dir), exist_ok=True)
 
     # we need the latent dim and the sub_tr used for training
+    
     input_inr = torch.load(root_dir / "inr" / f"{load_run_name}.pt")
     load_cfg = input_inr['cfg']
     latent_dim_in = input_inr["cfg"].inr_in.latent_dim
     latent_dim_out = input_inr["cfg"].inr_out.latent_dim
     seed = input_inr["cfg"].data.seed
+
+    if load_run_name_in is not None:
+        input_inr_in = torch.load(root_dir / "inr" / f"{load_run_name_in}.pt")
+        load_cfg_in = input_inr_in['cfg']
+        latent_dim_in = input_inr_in["cfg"].inr_in.latent_dim
 
     set_seed(seed)
 
@@ -157,13 +164,26 @@ def main(cfg: DictConfig) -> None:
     output_dim_out = 1
 
     # load inr weights
-    load_cfg.inr = load_cfg.inr_in
-    inr_in = create_inr_instance(
-        load_cfg, input_dim=input_dim, output_dim=output_dim_in, device="cuda"
-    )
-    inr_in.load_state_dict(input_inr["inr_in"])
-    inr_in.eval()
-    alpha_in = input_inr['alpha_in']
+    if load_run_name_in is not None:
+        load_cfg_in.inr = load_cfg_in.inr_in
+        inr_in = create_inr_instance(
+            load_cfg_in, input_dim=input_dim, output_dim=output_dim_in, device="cuda"
+        )
+        inr_in.load_state_dict(input_inr_in["inr_in"])
+        inr_in.eval()
+        alpha_in = input_inr_in['alpha_in']
+        epoch_in = input_inr_in['epoch']
+        print(f'load inr_in epoch {epoch_in}, alpha_in {alpha_in.item()}')
+    else:
+        load_cfg.inr = load_cfg.inr_in
+        inr_in = create_inr_instance(
+            load_cfg, input_dim=input_dim, output_dim=output_dim_in, device="cuda"
+        )
+        inr_in.load_state_dict(input_inr["inr_in"])
+        inr_in.eval()
+        alpha_in = input_inr['alpha_in']
+        epoch_in = input_inr['epoch']
+        print(f'load inr_in epoch {epoch_in}, alpha_in {alpha_in.item()}')
 
     
     load_cfg.inr = load_cfg.inr_out
@@ -173,7 +193,10 @@ def main(cfg: DictConfig) -> None:
     inr_out.load_state_dict(input_inr["inr_out"])
     inr_out.eval()
     alpha_out = input_inr['alpha_out']
-
+    epoch_out = input_inr['epoch']
+    print(f'load inr_out epoch {epoch_out}, alpha_out {alpha_out.item()}')
+    print(inr_in)
+    print(inr_out)
     # load modualations
 
     modulations = load_operator_modulations(
@@ -221,7 +244,7 @@ def main(cfg: DictConfig) -> None:
     test_loader = DataLoader(
         testset,
         batch_size=batch_size_val,
-        shuffle=True,
+        shuffle=False,
         num_workers=1,
     )
     
@@ -230,7 +253,7 @@ def main(cfg: DictConfig) -> None:
                 output_dim=latent_dim_out,
                 depth=depth,
                 dropout=cfg.model.dropout).cuda()
-
+    print(model)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=lr, weight_decay=weight_decay)
     
@@ -246,6 +269,364 @@ def main(cfg: DictConfig) -> None:
         eps=1e-08,
         verbose=True,
     )
+
+    if cfg.wandb.evaluate:
+        print(f'load {cfg.wandb.checkpoint_path}')
+        checkpoint = torch.load(cfg.wandb.checkpoint_path)
+        print(f"{checkpoint['epoch']}, {checkpoint['loss']}")
+        model.load_state_dict(checkpoint['model'])
+        code_test_mse = 0
+        pred_test_mse = 0
+        for substep, (a_s, u_s, za_s, zu_s, coords, idx) in enumerate(test_loader):
+            model.eval()
+            a_s = a_s.cuda()
+            u_s = u_s.cuda()
+            za_s = za_s.cuda()
+            zu_s = zu_s.cuda()
+            coords = coords.cuda()
+            n_samples = a_s.shape[0]
+
+            with torch.no_grad():
+                z_pred = model(za_s)
+            loss = ((z_pred - zu_s) ** 2).mean()
+            code_test_mse += loss.item() * n_samples
+            
+            with torch.no_grad():
+                pred = inr_out(coords, z_pred*sigma_u.cuda() + mu_u.cuda())
+                # z_pred: 64*128 
+                coeff = torch.arange(11) * 0.1 
+                coeff = coeff.unsqueeze(-1).cuda() 
+                z_inter = za_s[0:1] * coeff + (1-coeff) * za_s[1:2] 
+                pred_inter = inr_in(coords[:11], z_inter*sigma_a.cuda() + mu_a.cuda())
+                a_inter_data_space = a_s[0:1] * coeff.unsqueeze(-1) + (1-coeff.unsqueeze(-1)) * a_s[1:2] 
+
+                z_u_inter_map = model(z_inter)
+                z_u_inter = zu_s[0:1] * coeff + (1-coeff) * zu_s[1:2] 
+                u_inter_map = inr_out(coords[:11], z_u_inter_map*sigma_u.cuda() + mu_u.cuda())
+                u_inter = inr_out(coords[:11], z_u_inter*sigma_u.cuda() + mu_u.cuda())
+                u_inter_data_space = u_s[0:1] * coeff.unsqueeze(-1) + (1-coeff.unsqueeze(-1)) * u_s[1:2] 
+
+                print(pred_inter.shape)
+                from matplotlib import pyplot as plt 
+                from mpl_toolkits.axes_grid1 import make_axes_locatable
+                a_s = a_s.cpu()
+                u_s_draw = u_s.cpu()
+                pred_inter = pred_inter.cpu()
+                u_inter_map = u_inter_map.cpu()
+                u_inter = u_inter.cpu()
+                map_coords = coords[:11].cpu()
+                u_inter_data_space = u_inter_data_space.cpu()
+                a_inter_data_space = a_inter_data_space.cpu()
+
+                # a interpolate 
+                fig, axs = plt.subplots(1, 13, figsize=(13*6, 6), squeeze=False)
+                axs[0, 0].scatter(
+                        np.asarray(a_s[1, :, 0]),
+                        np.asarray(a_s[1, :, 1]),
+                        50,
+                        c='white',
+                        edgecolor="black",
+                        lw=0.1,
+                    )
+                for i in range(11):
+                    axs[0, i+1].scatter(
+                        np.asarray(pred_inter[i, :, 0]),
+                        np.asarray(pred_inter[i, :, 1]),
+                        50,
+                        c='white',
+                        edgecolor="black",
+                        lw=0.1,
+                    )
+                axs[0, 12].scatter(
+                        np.asarray(a_s[0, :, 0]),
+                        np.asarray(a_s[0, :, 1]),
+                        50,
+                        c='white',
+                        edgecolor="black",
+                        lw=0.1,
+                    )
+                plt.savefig(os.path.join(run.dir, f'latent_interpolate_input_{substep}.png'), dpi=72, bbox_inches='tight', pad_inches=0)
+                plt.close(fig)
+
+                # u interpolate 
+                fig, axs = plt.subplots(3, 13, figsize=(13*6, 3*6), squeeze=False)
+                lims = dict(cmap="RdBu_r", vmin=u_s[1].min(), vmax=u_s[1].max())
+                axs[0, 0].scatter(
+                        np.asarray(map_coords[1, :, 0]),
+                        np.asarray(map_coords[1, :, 1]),
+                        50,
+                        c=np.asarray(u_s_draw[1, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+                for i in range(11):
+                    lims = dict(cmap="RdBu_r", vmin=u_inter[i].min(), vmax=u_inter[i].max())
+                    axs[0, i+1].scatter(
+                        np.asarray(map_coords[i, :, 0]),
+                        np.asarray(map_coords[i, :, 1]),
+                        50,
+                        c=np.asarray(u_inter[i, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+                lims = dict(cmap="RdBu_r", vmin=u_s[0].min(), vmax=u_s[0].max())
+                axs[0, 12].scatter(
+                        np.asarray(map_coords[0, :, 0]),
+                        np.asarray(map_coords[0, :, 1]),
+                        50,
+                        c=np.asarray(u_s_draw[0, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+
+                # u map interpolate 
+                # fig, axs = plt.subplots(3, 13, figsize=(13*6, 3*6), squeeze=False)
+                lims = dict(cmap="RdBu_r", vmin=u_s[1].min(), vmax=u_s[1].max())
+                axs[1, 0].scatter(
+                        np.asarray(map_coords[1, :, 0]),
+                        np.asarray(map_coords[1, :, 1]),
+                        50,
+                        c=np.asarray(u_s_draw[1, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+                for i in range(11):
+                    lims = dict(cmap="RdBu_r", vmin=u_inter[i].min(), vmax=u_inter[i].max())
+                    axs[1, i+1].scatter(
+                        np.asarray(map_coords[i, :, 0]),
+                        np.asarray(map_coords[i, :, 1]),
+                        50,
+                        c=np.asarray(u_inter_map[i, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+                lims = dict(cmap="RdBu_r", vmin=u_s[0].min(), vmax=u_s[0].max())
+                axs[1, 12].scatter(
+                        np.asarray(map_coords[0, :, 0]),
+                        np.asarray(map_coords[0, :, 1]),
+                        50,
+                        c=np.asarray(u_s_draw[0, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+
+                # u map interpolate 
+                # fig, axs = plt.subplots(3, 13, figsize=(13*6, 3*6), squeeze=False)
+                lims = dict(cmap="RdBu_r", vmin=u_s[1].min(), vmax=u_s[1].max())
+                im = axs[2, 0].scatter(
+                        np.asarray(map_coords[1, :, 0]),
+                        np.asarray(map_coords[1, :, 1]),
+                        50,
+                        c=np.asarray(u_s_draw[1, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+                divider = make_axes_locatable(axs[2, 0])
+                cax = divider.append_axes('bottom', size='5%', pad=0.05)
+                fig.colorbar(im, cax=cax, orientation='horizontal')
+                axs[2, 0].set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
+                for i in range(11):
+                    lims = dict(cmap="RdBu_r", vmin=-0.5, vmax=0.5)
+                    im = axs[2, i+1].scatter(
+                        np.asarray(map_coords[i, :, 0]),
+                        np.asarray(map_coords[i, :, 1]),
+                        50,
+                        c=np.asarray(u_inter_map[i, ..., 0]-u_inter[i, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+                    divider = make_axes_locatable(axs[2, i+1])
+                    cax = divider.append_axes('bottom', size='5%', pad=0.05)
+                    fig.colorbar(im, cax=cax, orientation='horizontal')
+                    axs[2, i+1].set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
+
+                lims = dict(cmap="RdBu_r", vmin=u_s[0].min(), vmax=u_s[0].max())
+                im = axs[2, 12].scatter(
+                        np.asarray(map_coords[0, :, 0]),
+                        np.asarray(map_coords[0, :, 1]),
+                        50,
+                        c=np.asarray(u_s_draw[0, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+                divider = make_axes_locatable(axs[2, 12])
+                cax = divider.append_axes('bottom', size='5%', pad=0.05)
+                fig.colorbar(im, cax=cax, orientation='horizontal')
+                axs[2, 12].set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
+
+                plt.savefig(os.path.join(run.dir, f'latent_interpolate_output_{substep}.png'), dpi=72, bbox_inches='tight', pad_inches=0)
+                plt.close(fig)
+
+                # a interpolate 
+                fig, axs = plt.subplots(1, 13, figsize=(13*6, 6), squeeze=False)
+                axs[0, 0].scatter(
+                        np.asarray(a_s[1, :, 0]),
+                        np.asarray(a_s[1, :, 1]),
+                        50,
+                        c='white',
+                        edgecolor="black",
+                        lw=0.1,
+                    )
+                for i in range(11):
+                    axs[0, i+1].scatter(
+                        np.asarray(a_inter_data_space[i, :, 0]),
+                        np.asarray(a_inter_data_space[i, :, 1]),
+                        50,
+                        c='white',
+                        edgecolor="black",
+                        lw=0.1,
+                    )
+                axs[0, 12].scatter(
+                        np.asarray(a_s[0, :, 0]),
+                        np.asarray(a_s[0, :, 1]),
+                        50,
+                        c='white',
+                        edgecolor="black",
+                        lw=0.1,
+                    )
+                plt.savefig(os.path.join(run.dir, f'data_interpolate_input_{substep}.png'), dpi=72, bbox_inches='tight', pad_inches=0)
+                plt.close(fig)
+
+                # u interpolate 
+                fig, axs = plt.subplots(3, 13, figsize=(13*6, 3*6), squeeze=False)
+                lims = dict(cmap="RdBu_r", vmin=u_s[1].min(), vmax=u_s[1].max())
+                axs[0, 0].scatter(
+                        np.asarray(map_coords[1, :, 0]),
+                        np.asarray(map_coords[1, :, 1]),
+                        50,
+                        c=np.asarray(u_s_draw[1, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+                for i in range(11):
+                    lims = dict(cmap="RdBu_r", vmin=u_inter[i].min(), vmax=u_inter[i].max())
+                    axs[0, i+1].scatter(
+                        np.asarray(map_coords[i, :, 0]),
+                        np.asarray(map_coords[i, :, 1]),
+                        50,
+                        c=np.asarray(u_inter_data_space[i, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+                lims = dict(cmap="RdBu_r", vmin=u_s[0].min(), vmax=u_s[0].max())
+                axs[0, 12].scatter(
+                        np.asarray(map_coords[0, :, 0]),
+                        np.asarray(map_coords[0, :, 1]),
+                        50,
+                        c=np.asarray(u_s_draw[0, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+
+                # u map interpolate 
+                # fig, axs = plt.subplots(3, 13, figsize=(13*6, 3*6), squeeze=False)
+                lims = dict(cmap="RdBu_r", vmin=u_s[1].min(), vmax=u_s[1].max())
+                axs[1, 0].scatter(
+                        np.asarray(map_coords[1, :, 0]),
+                        np.asarray(map_coords[1, :, 1]),
+                        50,
+                        c=np.asarray(u_s_draw[1, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+                for i in range(11):
+                    lims = dict(cmap="RdBu_r", vmin=u_inter[i].min(), vmax=u_inter[i].max())
+                    axs[1, i+1].scatter(
+                        np.asarray(map_coords[i, :, 0]),
+                        np.asarray(map_coords[i, :, 1]),
+                        50,
+                        c=np.asarray(u_inter_map[i, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+                lims = dict(cmap="RdBu_r", vmin=u_s[0].min(), vmax=u_s[0].max())
+                axs[1, 12].scatter(
+                        np.asarray(map_coords[0, :, 0]),
+                        np.asarray(map_coords[0, :, 1]),
+                        50,
+                        c=np.asarray(u_s_draw[0, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+
+                # u map interpolate 
+                # fig, axs = plt.subplots(3, 13, figsize=(13*6, 3*6), squeeze=False)
+                lims = dict(cmap="RdBu_r", vmin=u_s[1].min(), vmax=u_s[1].max())
+                im = axs[2, 0].scatter(
+                        np.asarray(map_coords[1, :, 0]),
+                        np.asarray(map_coords[1, :, 1]),
+                        50,
+                        c=np.asarray(u_s_draw[1, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+                divider = make_axes_locatable(axs[2, 0])
+                cax = divider.append_axes('bottom', size='5%', pad=0.05)
+                fig.colorbar(im, cax=cax, orientation='horizontal')
+                axs[2, 0].set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
+                for i in range(11):
+                    lims = dict(cmap="RdBu_r", vmin=-0.5, vmax=0.5)
+                    im = axs[2, i+1].scatter(
+                        np.asarray(map_coords[i, :, 0]),
+                        np.asarray(map_coords[i, :, 1]),
+                        50,
+                        c=np.asarray(u_inter_map[i, ..., 0]-u_inter_data_space[i, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+                    divider = make_axes_locatable(axs[2, i+1])
+                    cax = divider.append_axes('bottom', size='5%', pad=0.05)
+                    fig.colorbar(im, cax=cax, orientation='horizontal')
+                    axs[2, i+1].set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
+
+                lims = dict(cmap="RdBu_r", vmin=u_s[0].min(), vmax=u_s[0].max())
+                im = axs[2, 12].scatter(
+                        np.asarray(map_coords[0, :, 0]),
+                        np.asarray(map_coords[0, :, 1]),
+                        50,
+                        c=np.asarray(u_s_draw[0, ..., 0]),
+                        edgecolor="black",
+                        lw=0.1,
+                        **lims,
+                    )
+                divider = make_axes_locatable(axs[2, 12])
+                cax = divider.append_axes('bottom', size='5%', pad=0.05)
+                fig.colorbar(im, cax=cax, orientation='horizontal')
+                axs[2, 12].set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
+
+                plt.savefig(os.path.join(run.dir, f'data_interpolate_output_{substep}.png'), dpi=72, bbox_inches='tight', pad_inches=0)
+                plt.close(fig)
+            '''
+            with torch.no_grad():
+                pred = inr_out(coords, z_pred*sigma_u.cuda() + mu_u.cuda())
+            '''
+            pred_test_mse += batch_mse_rel_fn(pred, u_s).mean() * n_samples
+            # if substep == 0:
+            #     from coral.utils.plot import show
+            #     with torch.no_grad():
+            #         print(a_s.shape, u_s.shape, coords.shape)
+            #         write_elasticity(u_s, pred, a_s, os.path.join(run.dir, f'test_'), num_examples=16)
+        code_test_mse = code_test_mse / ntest
+        pred_test_mse = pred_test_mse / ntest
+        print(f'code_test_mse: {code_test_mse}, pred_test_mse: {pred_test_mse}')
+        return 
 
     best_loss = np.inf
 
@@ -276,7 +657,7 @@ def main(cfg: DictConfig) -> None:
 
             if step_show:
                 with torch.no_grad():
-                    pred = inr_out.modulated_forward(coords, z_pred*sigma_u.cuda() + mu_u.cuda())
+                    pred = inr_out(coords, z_pred*sigma_u.cuda() + mu_u.cuda())
                 pred_train_mse += batch_mse_rel_fn(pred, u_s).mean() * n_samples
              
         code_train_mse = code_train_mse / ntrain
@@ -301,7 +682,7 @@ def main(cfg: DictConfig) -> None:
                 loss = ((z_pred - zu_s) ** 2).mean()
                 code_test_mse += loss.item() * n_samples
                 with torch.no_grad():
-                    pred = inr_out.modulated_forward(coords, z_pred*sigma_u.cuda() + mu_u.cuda())
+                    pred = inr_out(coords, z_pred*sigma_u.cuda() + mu_u.cuda())
                 pred_test_mse += batch_mse_rel_fn(pred, u_s).mean() * n_samples
 
             code_test_mse = code_test_mse / ntest

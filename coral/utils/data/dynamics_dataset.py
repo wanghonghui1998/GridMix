@@ -18,6 +18,12 @@ from torch_geometric.data import Data
 KEY_TO_INDEX = {
     "shallow-water-dino": {"height": 0, "vorticity": 1},
     "navier-stokes-dino": {"vorticity": 0},
+    "navier-stokes-dino-T100": {"vorticity": 0},
+    "navier-stokes-dino-mid40-T100": {"vorticity": 0},
+    "navier-stokes-dino-first40-T100": {"vorticity": 0},
+    "navier-stokes-dino-T100-2048": {"vorticity": 0},
+    "navier-stokes-dino-mid40-T100-2048": {"vorticity": 0},
+    "navier-stokes-dino-first40-T100-2048": {"vorticity": 0},
     "navier-stokes-nms": {"vorticity": 0},
     "navier-stokes-1e-5": {"vorticity": 0},
     "navier-stokes-1e-4": {"vorticity": 0},
@@ -31,6 +37,7 @@ KEY_TO_INDEX = {
     "navier-stokes-dino-40-64": {"vorticity": 0},
     "sst-11-22": {"vorticity": 0},
     "mp-pde-burgers": {"vorticity": 0},
+    "KS-fixed-viscosity-fixed-region": {"vorticity": 0},
 }
 
 

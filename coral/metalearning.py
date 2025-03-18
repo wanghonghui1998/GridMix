@@ -12,6 +12,353 @@ import coral.losses as losses
 
 # adapted from https://github.com/EmilienDupont/coinpp/blob/main/coinpp/metalearning.py
 
+def outer_step_share_latent_seq(
+    func_rep_in,
+    func_rep_out,
+    model,
+    coordinates,
+    features_in,
+    features_out,
+    inner_steps,
+    inner_lr,
+    is_train=False,
+    return_reconstructions=False,
+    gradient_checkpointing=False,
+    loss_type="mse",
+    modulations=0,
+    use_rel_loss=False,
+):
+    """
+
+    Args:
+        coordinates (torch.Tensor): Shape (batch_size, *, coordinate_dim). Note this
+            _must_ have a batch dimension.
+        features (torch.Tensor): Shape (batch_size, *, feature_dim). Note this _must_
+            have a batch dimension.
+    """
+
+    if loss_type == "mse":
+        loss_fn = losses.batch_mse_fn
+    elif loss_type == "bce":
+        loss_fn = losses.batch_nll_fn
+    elif "multiscale" in loss_type:
+        loss_name = loss_type.split("-")[1]
+        loss_fn = partial(losses.batch_multi_scale_fn, loss_name=loss_name)
+
+    func_rep_in.zero_grad()
+    func_rep_out.zero_grad()
+    batch_size = len(coordinates)
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
+
+    modulations = modulations.requires_grad_()
+
+    feat_in = features_in.clone()
+    feat_out = features_out.clone()
+    coords = coordinates.clone()
+
+    # Run inner loop
+    modulations = inner_loop(
+        func_rep_in,
+        modulations,
+        coords,
+        feat_in,
+        inner_steps,
+        inner_lr,
+        is_train,
+        gradient_checkpointing,
+        loss_type,
+    )
+
+    with torch.set_grad_enabled(is_train):
+        # features_recon = func_rep(coordinates, modulations)
+        features_recon_in = func_rep_in(coordinates, modulations)
+        per_example_loss = loss_fn(features_recon_in, features_in)  # features
+        loss_in = per_example_loss.mean()
+
+        features_recon_out = func_rep_out(coordinates, model(modulations))
+        per_example_loss = loss_fn(features_recon_out, features_out)  # features
+        loss_out = per_example_loss.mean()
+
+    outputs = {
+        "loss_in": loss_in,
+        "loss_out": loss_out,
+        "psnr_in": losses.mse2psnr(per_example_loss).mean().item(),
+        "psnr_out": losses.mse2psnr(per_example_loss).mean().item(),
+        "modulations": modulations,
+    }
+
+    if return_reconstructions:
+        outputs["reconstructions"] = (
+            features_recon[-1] if "multiscale" in loss_type else features_recon
+        )
+
+    if use_rel_loss:
+        rel_loss_out = (
+            losses.batch_mse_rel_fn(features_recon_out, features_out).mean()
+            if "multiscale" in loss_type
+            else losses.batch_mse_rel_fn(features_recon_out, features_out).mean()
+        )
+        outputs["rel_loss_out"] = rel_loss_out
+        rel_loss_in = (
+            losses.batch_mse_rel_fn(features_recon_in, features_in).mean()
+            if "multiscale" in loss_type
+            else losses.batch_mse_rel_fn(features_recon_in, features_in).mean()
+        )
+        outputs["rel_loss_in"] = rel_loss_in
+
+    return outputs
+
+def outer_step_share_latent_sync(
+    func_rep_in,
+    func_rep_out,
+    model,
+    coordinates,
+    features_in,
+    features_out,
+    inner_steps,
+    inner_lr,
+    is_train=False,
+    return_reconstructions=False,
+    gradient_checkpointing=False,
+    loss_type="mse",
+    modulations=0,
+    decode_in=True,
+    decode_out=False,
+    use_rel_loss=False,
+):
+    """
+
+    Args:
+        coordinates (torch.Tensor): Shape (batch_size, *, coordinate_dim). Note this
+            _must_ have a batch dimension.
+        features (torch.Tensor): Shape (batch_size, *, feature_dim). Note this _must_
+            have a batch dimension.
+    """
+
+    if loss_type == "mse":
+        loss_fn = losses.batch_mse_fn
+    elif loss_type == "bce":
+        loss_fn = losses.batch_nll_fn
+    elif "multiscale" in loss_type:
+        loss_name = loss_type.split("-")[1]
+        loss_fn = partial(losses.batch_multi_scale_fn, loss_name=loss_name)
+
+    func_rep_in.zero_grad()
+    func_rep_out.zero_grad()
+    batch_size = len(coordinates)
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
+
+    modulations = modulations.requires_grad_()
+
+    feat_in = features_in.clone()
+    feat_out = features_out.clone()
+    coords = coordinates.clone()
+
+    # Run inner loop
+    modulations = inner_loop_share_latent_sync(
+        func_rep_in,
+        func_rep_out,
+        model,
+        modulations,
+        coords,
+        feat_in,
+        feat_out,
+        inner_steps,
+        inner_lr,
+        is_train,
+        gradient_checkpointing,
+        loss_type,
+        decode_in,
+        decode_out,
+    )
+
+    with torch.set_grad_enabled(is_train):
+        # features_recon = func_rep(coordinates, modulations)
+        C = modulations.shape[-1]
+        modulations_all = model(modulations)
+        C_all = modulations_all.shape[-1]
+        if C_all != C:
+            modulations_in, modulations_out = modulations_all[...,:C//2], modulations_all[...,C//2:]
+        else:
+            modulations_in, modulations_out = modulations_all, modulations_all
+        features_recon_in = func_rep_in(coordinates, modulations_in)
+        per_example_loss = loss_fn(features_recon_in, features_in)  # features
+        loss_in = per_example_loss.mean()
+
+        features_recon_out = func_rep_out(coordinates, modulations_out)
+        per_example_loss = loss_fn(features_recon_out, features_out)  # features
+        loss_out = per_example_loss.mean()
+
+    outputs = {
+        "loss_in": loss_in,
+        "loss_out": loss_out,
+        "psnr_in": losses.mse2psnr(per_example_loss).mean().item(),
+        "psnr_out": losses.mse2psnr(per_example_loss).mean().item(),
+        "modulations": modulations,
+    }
+
+    if return_reconstructions:
+        outputs["reconstructions"] = (
+            features_recon[-1] if "multiscale" in loss_type else features_recon
+        )
+
+    if use_rel_loss:
+        rel_loss_out = (
+            losses.batch_mse_rel_fn(features_recon_out, features_out).mean()
+            if "multiscale" in loss_type
+            else losses.batch_mse_rel_fn(features_recon_out, features_out).mean()
+        )
+        outputs["rel_loss_out"] = rel_loss_out
+        rel_loss_in = (
+            losses.batch_mse_rel_fn(features_recon_in, features_in).mean()
+            if "multiscale" in loss_type
+            else losses.batch_mse_rel_fn(features_recon_in, features_in).mean()
+        )
+        outputs["rel_loss_in"] = rel_loss_in
+
+    return outputs
+
+def inner_loop_share_latent_sync(
+    func_rep_in,
+    func_rep_out,
+    model,
+    modulations,
+    coordinates,
+    features_in,
+    features_out,
+    inner_steps,
+    inner_lr,
+    is_train=False,
+    gradient_checkpointing=False,
+    loss_type="mse",
+    decode_in=True,
+    decode_out=False,
+):
+    """Performs inner loop, i.e. fits modulations such that the function
+    representation can match the target features.
+
+    Args:
+        func_rep (models.ModulatedSiren):
+        modulations (torch.Tensor): Shape (batch_size, latent_dim).
+        coordinates (torch.Tensor): Coordinates at which function representation
+            should be evaluated. Shape (batch_size, *, coordinate_dim).
+        features (torch.Tensor): Target features for model to match. Shape
+            (batch_size, *, feature_dim).
+        inner_steps (int): Number of inner loop steps to take.
+        inner_lr (float): Learning rate for inner loop.
+        is_train (bool):
+        gradient_checkpointing (bool): If True uses gradient checkpointing. This
+            can massively reduce memory consumption.
+    """
+    fitted_modulations = modulations
+    for step in range(inner_steps):
+        if gradient_checkpointing:
+            fitted_modulations = cp.checkpoint(
+                inner_loop_step_share_latent_sync,
+                func_rep_in,
+                func_rep_out,
+                model,
+                fitted_modulations,
+                coordinates,
+                features_in,
+                features_out,
+                torch.as_tensor(inner_lr),
+                torch.as_tensor(is_train),
+                torch.as_tensor(gradient_checkpointing),
+                loss_type,
+                decode_in,
+                decode_out,
+            )
+        else:
+            fitted_modulations = inner_loop_step_share_latent_sync(
+                func_rep_in,
+                func_rep_out,
+                model,
+                fitted_modulations,
+                coordinates,
+                features_in,
+                features_out,
+                inner_lr,
+                is_train,
+                gradient_checkpointing,
+                loss_type,
+                decode_in,
+                decode_out,
+            )
+    return fitted_modulations
+
+
+def inner_loop_step_share_latent_sync(
+    func_rep_in,
+    func_rep_out,
+    model,
+    modulations,
+    coordinates,
+    features_in,
+    features_out,
+    inner_lr,
+    is_train=False,
+    gradient_checkpointing=False,
+    loss_type="mse",
+    decode_in=True,
+    decode_out=False,
+):
+    """Performs a single inner loop step."""
+    detach = not torch.is_grad_enabled() and gradient_checkpointing
+    batch_size = len(features_in)
+    if loss_type == "mse":
+        element_loss_fn = losses.per_element_mse_fn
+    elif loss_type == "bce":
+        element_loss_fn = losses.per_element_nll_fn
+    elif "multiscale" in loss_type:
+        loss_name = loss_type.split("-")[1]
+        element_loss_fn = partial(
+            losses.per_element_multi_scale_fn,
+            loss_name=loss_name,
+            last_element=False,
+        )
+
+    N, C = modulations.shape[0], modulations.shape[-1]
+
+    with torch.enable_grad():
+        # Note we multiply by batch size here to undo the averaging across batch
+        # elements from the MSE function. Indeed, each set of modulations is fit
+        # independently and the size of the gradient should not depend on how
+        # many elements are in the batch
+        # features_recon = func_rep(coordinates, modulations)
+        modulations_all = model(modulations)
+        C_all = modulations_all.shape[-1]   
+        if C_all != C:
+            modulations_in, modulations_out = modulations_all[...,:C//2], modulations_all[...,C//2:]
+        else:
+            modulations_in, modulations_out = modulations_all, modulations_all
+        
+        if decode_in:
+            features_recon_in = func_rep_in(coordinates, modulations_in)
+            loss_in = element_loss_fn(features_recon_in, features_in).mean() * batch_size
+        else:
+            loss_in = 0
+        if decode_out:
+            features_recon_out = func_rep_out(coordinates, modulations_out)
+            loss_out = element_loss_fn(features_recon_out, features_out).mean() * batch_size
+        else:
+            loss_out = 0
+        loss = loss_in + loss_out
+
+        # If we are training, we should create graph since we will need this to
+        # compute second order gradients in the MAML outer loop
+        grad = torch.autograd.grad(
+            loss,
+            modulations,
+            create_graph=is_train and not detach,
+        )[0]
+        # if clip_grad_value is not None:
+        #    nn.utils.clip_grad_value_(grad, clip_grad_value)
+    # Perform single gradient descent step
+    return modulations - inner_lr * grad
+
 def inner_loop(
     func_rep,
     modulations,
@@ -99,8 +446,9 @@ def inner_loop_step(
         # elements from the MSE function. Indeed, each set of modulations is fit
         # independently and the size of the gradient should not depend on how
         # many elements are in the batch
-        features_recon = func_rep.modulated_forward(coordinates, modulations)
-
+        # features_recon = func_rep(coordinates, modulations)
+        features_recon = func_rep(coordinates, modulations)
+        # import pdb; pdb.set_trace()
         loss = element_loss_fn(features_recon, features).mean() * batch_size
 
         # If we are training, we should create graph since we will need this to
@@ -210,7 +558,7 @@ def inner_loop_step_grad_mask_sep_lr(
         # elements from the MSE function. Indeed, each set of modulations is fit
         # independently and the size of the gradient should not depend on how
         # many elements are in the batch
-        features_recon = func_rep.modulated_forward(coordinates, modulations)
+        features_recon = func_rep(coordinates, modulations)
 
         loss = element_loss_fn(features_recon, features).mean() * batch_size
 
@@ -258,8 +606,8 @@ def outer_step_dino(
 
     # func_rep.zero_grad()
     batch_size = len(coordinates)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     # modulations = modulations.requires_grad_()
 
@@ -280,7 +628,7 @@ def outer_step_dino(
     # )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coordinates, modulations)
+        features_recon = func_rep(coordinates, modulations)
         per_example_loss = loss_fn(features_recon, features)  # features
         loss = per_example_loss.mean()
 
@@ -342,8 +690,8 @@ def outer_step_metagrid_twoview_rand(
 
     func_rep.zero_grad()
     batch_size = len(coordinates)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     modulations = torch.cat([modulations, modulations], dim=0)
     modulations = modulations.requires_grad_()
@@ -379,7 +727,7 @@ def outer_step_metagrid_twoview_rand(
     )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coords_val, modulations)
+        features_recon = func_rep(coords_val, modulations)
         per_example_loss = loss_fn(features_recon, feat_val)  # features
         loss = per_example_loss.mean()
         modulations_con = modulations[...,code_dim:].reshape(-1, grid_channel, grid_size*grid_size)
@@ -444,8 +792,8 @@ def outer_step_metagrid_twoview(
 
     func_rep.zero_grad()
     batch_size = len(coordinates)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     modulations = torch.cat([modulations, modulations], dim=0)
     modulations = modulations.requires_grad_()
@@ -471,7 +819,7 @@ def outer_step_metagrid_twoview(
     )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(torch.cat([coords_view2, coords_view1],dim=0), modulations)
+        features_recon = func_rep(torch.cat([coords_view2, coords_view1],dim=0), modulations)
         per_example_loss = loss_fn(features_recon, torch.cat([feat_view2, feat_view1],dim=0))  # features
         loss = per_example_loss.mean()
         mod1, mod2 = torch.chunk(modulations, 2, dim=0)
@@ -535,8 +883,8 @@ def outer_step_metagrid_same_coords_teacher_boosting(
 
     func_rep.zero_grad()
     batch_size = len(coordinates)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     modulations = modulations.requires_grad_()
     num_points = features.shape[1]
@@ -563,7 +911,7 @@ def outer_step_metagrid_same_coords_teacher_boosting(
     )
 
     with torch.set_grad_enabled(False):
-        extra_features_recon = func_rep_teacher.modulated_forward(extra_coordinates, modulations)
+        extra_features_recon = func_rep_teacher(extra_coordinates, modulations)
         # per_example_loss = loss_fn(features_recon, feat_val)  # features
         # loss = per_example_loss.mean()
     
@@ -585,7 +933,7 @@ def outer_step_metagrid_same_coords_teacher_boosting(
     )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coords_val, modulations)
+        features_recon = func_rep(coords_val, modulations)
         per_example_loss = loss_fn(features_recon, feat_val)  # features
         loss = per_example_loss.mean()
 
@@ -645,8 +993,8 @@ def outer_step_metagrid_same_coords_sep_lr(
 
     func_rep.zero_grad()
     batch_size = len(coordinates)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     modulations = modulations.requires_grad_()
     num_points = features.shape[1]
@@ -676,7 +1024,7 @@ def outer_step_metagrid_same_coords_sep_lr(
     )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coords_val, modulations)
+        features_recon = func_rep(coords_val, modulations)
         per_example_loss = loss_fn(features_recon, feat_val)  # features
         loss = per_example_loss.mean()
 
@@ -736,8 +1084,8 @@ def outer_step_metagrid_same_coords_sep_lr_two_stage(
 
     func_rep.zero_grad()
     batch_size = len(coordinates)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     modulations = modulations.requires_grad_()
     num_points = features.shape[1]
@@ -783,7 +1131,7 @@ def outer_step_metagrid_same_coords_sep_lr_two_stage(
     )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coords_val, modulations)
+        features_recon = func_rep(coords_val, modulations)
         per_example_loss = loss_fn(features_recon, feat_val)  # features
         loss = per_example_loss.mean()
 
@@ -841,8 +1189,8 @@ def outer_step_metagrid_same_coords(
 
     func_rep.zero_grad()
     batch_size = len(coordinates)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     modulations = modulations.requires_grad_()
     num_points = features.shape[1]
@@ -869,7 +1217,7 @@ def outer_step_metagrid_same_coords(
     )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coords_val, modulations)
+        features_recon = func_rep(coords_val, modulations)
         per_example_loss = loss_fn(features_recon, feat_val)  # features
         loss = per_example_loss.mean()
 
@@ -928,8 +1276,8 @@ def outer_step_metagrid_part_coords(
 
     func_rep.zero_grad()
     batch_size = len(coordinates)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     modulations = modulations.requires_grad_()
     num_points = features.shape[1]
@@ -956,7 +1304,7 @@ def outer_step_metagrid_part_coords(
     )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coords_val, modulations)
+        features_recon = func_rep(coords_val, modulations)
         per_example_loss = loss_fn(features_recon, feat_val)  # features
         loss = per_example_loss.mean()
 
@@ -1014,8 +1362,8 @@ def outer_step_metagrid(
 
     func_rep.zero_grad()
     batch_size = len(coordinates)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     modulations = modulations.requires_grad_()
     num_points = features.shape[1]
@@ -1040,7 +1388,7 @@ def outer_step_metagrid(
     )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coords_val, modulations)
+        features_recon = func_rep(coords_val, modulations)
         per_example_loss = loss_fn(features_recon, feat_val)  # features
         loss = per_example_loss.mean()
 
@@ -1097,8 +1445,8 @@ def outer_step_multiple_init(
 
     func_rep.zero_grad()
     
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     num_init = func_rep.latent_init.shape[0]
     batch_size = len(coordinates)
@@ -1131,7 +1479,7 @@ def outer_step_multiple_init(
     )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coordinates, modulations)
+        features_recon = func_rep(coordinates, modulations)
         per_example_loss = loss_fn(features_recon, features)  # features
         per_example_loss_min,_ = torch.min(per_example_loss.reshape(num_init, batch_size), dim=0)
         loss = per_example_loss_min.mean()
@@ -1189,8 +1537,8 @@ def outer_step(
 
     func_rep.zero_grad()
     batch_size = len(coordinates)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     modulations = modulations.requires_grad_()
 
@@ -1211,7 +1559,8 @@ def outer_step(
     )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coordinates, modulations)
+        # features_recon = func_rep(coordinates, modulations)
+        features_recon = func_rep(coordinates, modulations)
         per_example_loss = loss_fn(features_recon, features)  # features
         loss = per_example_loss.mean()
 
@@ -1224,6 +1573,110 @@ def outer_step(
     if return_reconstructions:
         outputs["reconstructions"] = (
             features_recon[-1] if "multiscale" in loss_type else features_recon
+        )
+
+    if use_rel_loss:
+        rel_loss = (
+            losses.batch_mse_rel_fn(features_recon[-1], features).mean()
+            if "multiscale" in loss_type
+            else losses.batch_mse_rel_fn(features_recon, features).mean()
+        )
+        outputs["rel_loss"] = rel_loss
+
+    return outputs
+
+
+def outer_step_addition_grid(
+    func_rep,
+    coordinates,
+    features,
+    u_part, 
+    grid_part,
+    u_full,
+    grid_full,
+    inner_steps,
+    inner_lr,
+    is_train=False,
+    return_reconstructions=False,
+    gradient_checkpointing=False,
+    loss_type="mse",
+    modulations=0,
+    use_rel_loss=False,
+):
+    """
+
+    Args:
+        coordinates (torch.Tensor): Shape (batch_size, *, coordinate_dim). Note this
+            _must_ have a batch dimension.
+        features (torch.Tensor): Shape (batch_size, *, feature_dim). Note this _must_
+            have a batch dimension.
+    """
+
+    if loss_type == "mse":
+        loss_fn = losses.batch_mse_fn
+    elif loss_type == "bce":
+        loss_fn = losses.batch_nll_fn
+    elif "multiscale" in loss_type:
+        loss_name = loss_type.split("-")[1]
+        loss_fn = partial(losses.batch_multi_scale_fn, loss_name=loss_name)
+
+    func_rep.zero_grad()
+    batch_size = len(coordinates)
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
+
+    modulations = modulations.requires_grad_()
+
+    feat = features.clone()
+    coords = coordinates.clone()
+
+    # Run inner loop
+    modulations = inner_loop(
+        func_rep,
+        modulations,
+        coords,
+        feat,
+        inner_steps,
+        inner_lr,
+        is_train,
+        gradient_checkpointing,
+        loss_type,
+    )
+
+    with torch.set_grad_enabled(is_train):
+        # features_recon = func_rep(coordinates, modulations)
+        features_recon = func_rep(coordinates, modulations)
+        per_example_loss = loss_fn(features_recon, features)  # features
+        loss = per_example_loss.mean()
+
+        u_part_recon = func_rep(grid_part, modulations)
+        part_per_example_loss = loss_fn(u_part_recon, u_part)  # features
+        loss_part = part_per_example_loss.mean()
+
+        u_full_recon = func_rep(grid_full, modulations)
+        full_per_example_loss = loss_fn(u_full_recon, u_full)  # features
+        loss_full = full_per_example_loss.mean()
+
+
+    outputs = {
+        "loss": loss,
+        "loss_part": loss_part,
+        "loss_full": loss_full,
+        "psnr": losses.mse2psnr(per_example_loss).mean().item(),
+        "modulations": modulations,
+    }
+
+    if return_reconstructions:
+        outputs["reconstructions"] = (
+            features_recon[-1] if "multiscale" in loss_type else features_recon
+        )
+
+        outputs["reconstructions_part"] = (
+            u_part_recon[-1] if "multiscale" in loss_type else u_part_recon
+        )
+
+        outputs["reconstructions_full"] = (
+            u_full_recon[-1] if "multiscale" in loss_type else u_full_recon
         )
 
     if use_rel_loss:
@@ -1269,8 +1722,8 @@ def outer_step_boosting(
 
     func_rep.zero_grad()
     batch_size = len(coordinates)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     modulations = modulations.requires_grad_()
 
@@ -1291,7 +1744,7 @@ def outer_step_boosting(
     )
 
     with torch.set_grad_enabled(is_train):
-        extra_features_recon = func_rep.modulated_forward(extra_coordinates, modulations)
+        extra_features_recon = func_rep(extra_coordinates, modulations)
 
     coords = torch.cat([coordinates, extra_coordinates], dim=1)
     feat = torch.cat([features, extra_features_recon.detach()], dim=1)
@@ -1312,7 +1765,7 @@ def outer_step_boosting(
     )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coordinates, modulations)
+        features_recon = func_rep(coordinates, modulations)
         per_example_loss = loss_fn(features_recon, features)  # features
         loss = per_example_loss.mean()
 
@@ -1371,8 +1824,8 @@ def outer_step_test_on_diff_grid(
 
     func_rep.zero_grad()
     batch_size = len(coordinates)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     modulations = modulations.requires_grad_()
 
@@ -1393,10 +1846,10 @@ def outer_step_test_on_diff_grid(
     )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coordinates, modulations)
+        features_recon = func_rep(coordinates, modulations)
         per_example_loss = loss_fn(features_recon, features)  # features
         loss = per_example_loss.mean()
-        diff_features_recon = func_rep.modulated_forward(diff_coordinates, modulations)
+        diff_features_recon = func_rep(diff_coordinates, modulations)
         diff_per_example_loss = loss_fn(diff_features_recon, diff_features)  # features
         diff_loss = diff_per_example_loss.mean()
 
@@ -1458,8 +1911,8 @@ def outer_step_kd(
 
     func_rep.zero_grad()
     batch_size = len(coordinates)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     teacher_modulations = teacher_modulations.requires_grad_()
     teacher_feat = features.clone()
@@ -1480,7 +1933,7 @@ def outer_step_kd(
     coords = torch.rand((1, kd_num_coords, coordinates.shape[-1]), device=coordinates.device).repeat(coordinates.shape[0], 1, 1)
     coords = torch.cat([coordinates, coords], dim=1)
     with torch.set_grad_enabled(False):
-        feat = teacher_func_rep.modulated_forward(coords, teacher_modulations)
+        feat = teacher_func_rep(coords, teacher_modulations)
         teacher_per_example_loss = loss_fn(feat[:,:features.shape[1]], features)  # features
         teacher_loss = teacher_per_example_loss.mean()
     
@@ -1505,7 +1958,7 @@ def outer_step_kd(
     )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coords, modulations)
+        features_recon = func_rep(coords, modulations)
         per_example_loss = loss_fn(features_recon, feat)  # features
         loss = per_example_loss.mean()
 
@@ -1565,8 +2018,8 @@ def outer_step_extra_grid(
 
     func_rep.zero_grad()
     batch_size = len(coordinates)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     modulations = modulations.requires_grad_()
 
@@ -1587,12 +2040,12 @@ def outer_step_extra_grid(
     )
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coordinates, modulations)
+        features_recon = func_rep(coordinates, modulations)
         per_example_loss = loss_fn(features_recon, features)  # features
         loss = per_example_loss.mean()
 
     with torch.set_grad_enabled(False):
-        features_recon_extra_grid = func_rep.modulated_forward(coordinates_extra_grid, modulations)
+        features_recon_extra_grid = func_rep(coordinates_extra_grid, modulations)
         per_example_loss_extra_grid = loss_fn(features_recon_extra_grid, features_extra_grid)  # features
         loss_extra_grid = per_example_loss_extra_grid.mean()
 
@@ -1708,8 +2161,8 @@ def graph_inner_loop_step(
         # elements from the MSE function. Indeed, each set of modulations is fit
         # independently and the size of the gradient should not depend on how
         # many elements are in the batch
-
-        features_recon = func_rep.modulated_forward(coords, modulations[batch_index])
+        # import pdb; pdb.set_trace()
+        features_recon = func_rep(coords, modulations[batch_index])
         loss = ((features_recon - features) ** 2).mean() * batch_size
 
         # If we are training, we should create graph since we will need this to
@@ -1755,8 +2208,8 @@ def graph_outer_step(
 
     func_rep.zero_grad()
     batch_size = len(graph)
-    if isinstance(func_rep, DDP):
-        func_rep = func_rep.module
+    # if isinstance(func_rep, DDP):
+    #     func_rep = func_rep.module
 
     modulations = torch.zeros_like(graph.modulations).requires_grad_()
     coords = graph.pos
@@ -1783,7 +2236,7 @@ def graph_outer_step(
     batch_size = modulations.shape[0]
 
     with torch.set_grad_enabled(is_train):
-        features_recon = func_rep.modulated_forward(coords, modulations[graph.batch])
+        features_recon = func_rep(coords, modulations[graph.batch])
         loss = ((features_recon - features) ** 2).mean()
 
     outputs = {

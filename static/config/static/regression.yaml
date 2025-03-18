@@ -6,7 +6,7 @@ defaults:
   - wandb: null
 
 data:
-  dir: "/data/serrano/deeponet-fourier-data"
+  dir: "/cluster/nvme4a/whh/dataset/geo-fno"
   dataset_name: "airfoil" 
   data_to_encode:
   ntrain : 
@@ -25,6 +25,8 @@ optim:
   weight_decay: 0
   gamma_step : 0.9
   epochs : 1000
+  mixup_w: 1.0 
+  mixup_alpha: 0.5
 
 model:
   model_type: resnet
@@ -37,14 +39,18 @@ model:
 inr:
   inner_steps: 3
   run_name:
+  run_name_in:
 
 wandb:
-  entity: "spatiotemp-isir"
-  project: "functa2functa"
+  entity: "wanghonghui1998"
+  project: "marble"
   name: 
   id: 
   dir: 
   sweep_id: 
+  saved_checkpoint: False
+  checkpoint_path:
+  evaluate:
 
 
 jz: 

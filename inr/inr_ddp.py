@@ -25,6 +25,14 @@ from coral.utils.plot import show
 from coral.utils.init_environ import init_environ 
 from visualize import write_image_pair, write_image  
 
+class INR_with_alpha(nn.Module):
+    def __init__(self, inr, alpha):
+        super().__init__()
+        self.inr = inr 
+        self.alpha = alpha 
+    def forward(self, x, latent):
+        return self.inr(x, latent)
+
 @hydra.main(config_path="config/", config_name="siren.yaml")
 def main(cfg: DictConfig) -> None:
     init_environ(cfg)
@@ -227,23 +235,31 @@ def main(cfg: DictConfig) -> None:
     inr = create_inr_instance(
         cfg, input_dim=input_dim, output_dim=output_dim, device="cuda"
     )
-
+    alpha = nn.Parameter(torch.Tensor([lr_code]).to(device))
+    inr_with_alpha = INR_with_alpha(inr, alpha)
     if cfg.distributed:
-        inr = torch.nn.parallel.DistributedDataParallel(inr, device_ids=[cfg.gpu_id])
-        inr_without_ddp = inr.module 
-    else:
-        inr_without_ddp = inr
+        inr_with_alpha = torch.nn.parallel.DistributedDataParallel(inr_with_alpha, device_ids=[cfg.gpu_id])
+        inr = inr_with_alpha.module.inr 
+        alpha = inr_with_alpha.module.alpha 
+        # inr_without_ddp = inr
+    # else:
+    #     inr_without_ddp = inr
+    # if cfg.distributed:
+    #     inr = torch.nn.parallel.DistributedDataParallel(inr, device_ids=[cfg.gpu_id])
+    #     inr_without_ddp = inr.module 
+    # else:
+    #     inr_without_ddp = inr
 
     print(inr)
     if random_init:
         random_init_std = 1 * math.sqrt(1.0 / cfg.inr.hidden_dim)   # 0.001 for LR
-    alpha = nn.Parameter(torch.Tensor([lr_code]).to(device))
+    
     meta_lr_code = meta_lr_code
     weight_decay_lr_code = weight_decay_code
     
     update_alpha = cfg.optim.update_alpha
     if update_alpha:
-        if 'MoG' in model_type:
+        if 'GridMix' in model_type:
             params_net = []
             params_grid = []
             for name, param in inr.named_parameters():
@@ -261,6 +277,7 @@ def main(cfg: DictConfig) -> None:
                 lr=lr_inr,
                 weight_decay=0,
                 )
+            print('optimize gridmix')
         else:
             optimizer = torch.optim.AdamW(
             [
@@ -335,7 +352,7 @@ def main(cfg: DictConfig) -> None:
 
         for substep, (images, modulations, coords, idx) in enumerate(train_loader):
             # print(alpha)
-            inr.train()
+            inr_with_alpha.train()
             images = images.to(device)  # torch.Size([128, 64, 64, 1])
             modulations = modulations.to(device)    # torch.Size([128, 128])
             coords = coords.to(device)  # torch.Size([128, 64, 64, 2])            
@@ -353,7 +370,7 @@ def main(cfg: DictConfig) -> None:
             # print(input_modulations.mean())
             if multi_init:
                 outputs = outer_step_multiple_init(
-                    inr,
+                    inr_with_alpha,
                     coords,
                     images,
                     inner_steps,
@@ -368,7 +385,7 @@ def main(cfg: DictConfig) -> None:
                 )
             else:
                 outputs = outer_step(
-                    inr,
+                    inr_with_alpha,
                     coords,
                     images,
                     inner_steps,
@@ -388,7 +405,7 @@ def main(cfg: DictConfig) -> None:
             optimizer.step()
             loss = outputs["loss"].cpu().detach()
             fit_train_mse[0] += loss.item() * n_samples
-
+            # print(f'{cfg.rank} {substep} {alpha.item()} {inr.last_layer.linear.weight.mean()}')
             # mlp regression
             if use_rel_loss:
                 rel_train_mse[0] += outputs["rel_loss"].item() * n_samples
@@ -426,7 +443,7 @@ def main(cfg: DictConfig) -> None:
             plot_modulations = []
             plot_modulations_num = 0
             for images, modulations, coords, idx in test_loader:
-                inr.eval()
+                inr_with_alpha.eval()
                 images = images.to(device)
                 modulations = modulations.to(device)
                 coords = coords.to(device)
@@ -438,7 +455,7 @@ def main(cfg: DictConfig) -> None:
                     input_modulations = torch.zeros_like(modulations)
                 if multi_init:
                     outputs = outer_step_multiple_init(
-                        inr,
+                        inr_with_alpha,
                         coords,
                         images,
                         test_inner_steps,
@@ -453,7 +470,7 @@ def main(cfg: DictConfig) -> None:
                     )
                 else:
                     outputs = outer_step(
-                        inr,
+                        inr_with_alpha,
                         coords,
                         images,
                         test_inner_steps,
@@ -489,7 +506,7 @@ def main(cfg: DictConfig) -> None:
             plot_modulations_train_coords = []
             plot_modulations_num = 0
             for images, modulations, coords, idx in test_in_loader:
-                inr.eval()
+                inr_with_alpha.eval()
                 images = images.to(device)
                 modulations = modulations.to(device)
                 coords = coords.to(device)
@@ -502,7 +519,7 @@ def main(cfg: DictConfig) -> None:
                     input_modulations = torch.zeros_like(modulations)
                 if multi_init:
                     outputs = outer_step_multiple_init(
-                        inr,
+                        inr_with_alpha,
                         coords,
                         images,
                         test_inner_steps,
@@ -517,7 +534,7 @@ def main(cfg: DictConfig) -> None:
                     )
                 else:
                     outputs = outer_step(
-                        inr,
+                        inr_with_alpha,
                         coords,
                         images,
                         test_inner_steps,

@@ -41,6 +41,7 @@ optim:
   temperature: 1.0
   w_cl: 1.0 
   lr_grid : 0.01
+  save_best_test: False
 
 inr:
   model_type : "siren"
@@ -57,6 +58,7 @@ inr:
   loss_type: "mse"
   use_norm: True 
   grid_size: 64
+  grid_size_2: 0
   siren_init: True
   n_levels: 4
   n_features_per_level: 2
@@ -77,7 +79,7 @@ inr:
   
 wandb:
   entity: "wanghonghui1998"
-  project: "functa2functa"
+  project: "marble"
   name: 
   id: 
   dir:

@@ -15,7 +15,7 @@ from torch_geometric.data import Dataset, Data
 from torch_geometric.loader import DataLoader
 import json
 import functools
-import tensorflow as tf
+# import tensorflow as tf
 from coral.mlp import MLP
 
 KEY_TO_INDEX = {
@@ -35,22 +35,23 @@ KEY_TO_STATS = {
 
 def _parse(proto, meta):
     """Parses a trajectory from tf.Example."""
-    feature_lists = {k: tf.io.VarLenFeature(tf.string) for k in meta["field_names"]}
-    features = tf.io.parse_single_example(proto, feature_lists)
-    out = {}
-    for key, field in meta["features"].items():
-        data = tf.io.decode_raw(features[key].values, getattr(tf, field["dtype"]))
-        data = tf.reshape(data, field["shape"])
-        if field["type"] == "static":
-            data = tf.tile(data, [meta["trajectory_length"], 1, 1])
-        elif field["type"] == "dynamic_varlen":
-            length = tf.io.decode_raw(features["length_" + key].values, tf.int32)
-            length = tf.reshape(length, [-1])
-            data = tf.RaggedTensor.from_row_lengths(data, row_lengths=length)
-        elif field["type"] != "dynamic":
-            raise ValueError("invalid data format")
-        out[key] = data
-    return out
+    # feature_lists = {k: tf.io.VarLenFeature(tf.string) for k in meta["field_names"]}
+    # features = tf.io.parse_single_example(proto, feature_lists)
+    # out = {}
+    # for key, field in meta["features"].items():
+    #     data = tf.io.decode_raw(features[key].values, getattr(tf, field["dtype"]))
+    #     data = tf.reshape(data, field["shape"])
+    #     if field["type"] == "static":
+    #         data = tf.tile(data, [meta["trajectory_length"], 1, 1])
+    #     elif field["type"] == "dynamic_varlen":
+    #         length = tf.io.decode_raw(features["length_" + key].values, tf.int32)
+    #         length = tf.reshape(length, [-1])
+    #         data = tf.RaggedTensor.from_row_lengths(data, row_lengths=length)
+    #     elif field["type"] != "dynamic":
+    #         raise ValueError("invalid data format")
+    #     out[key] = data
+    # return out
+    pass 
 
 
 def load_dataset(path, split):
@@ -68,7 +69,7 @@ class CylinderFlowDataset(Dataset):
 
     def __init__(
         self,
-        path="/data/serrano/inr_domain_decomposition/cylinder_flow",
+        path="/cluster/nvme4a/whh/dataset/inr_domain_decomposition/cylinder_flow",
         split="train",
         latent_dim=128,
         noise=0.02,
@@ -188,7 +189,7 @@ class AirfoilFlowDataset(Dataset):
 
     def __init__(
         self,
-        path="/data/serrano/inr_domain_decomposition/airfoil",
+        path="/cluster/nvme4a/whh/dataset/inr_domain_decomposition/airfoil",
         split="train",
         latent_dim=128,
         noise=0.02,
@@ -339,7 +340,7 @@ if __name__ == "__main__":
     dataset_name = "airfoil-flow"
 
     if dataset_name == "cylinder-flow":
-        path = Path("/data/serrano/inr_domain_decomposition/cylinder_flow")
+        path = Path("/cluster/nvme4a/whh/dataset/inr_domain_decomposition/cylinder_flow")
         trainset = CylinderFlowDataset(
             path=path, split="test", latent_dim=128, noise=0.02, task="static"
         )
@@ -355,7 +356,7 @@ if __name__ == "__main__":
                 output_dim=4,
                 depth=3,
                 dropout=0).cuda()
-        path = Path("/data/serrano/inr_domain_decomposition/airfoil")
+        path = Path("/cluster/nvme4a/whh/dataset/inr_domain_decomposition/airfoil")
         trainset = AirfoilFlowDataset(
             path=path, split="train", latent_dim=128, noise=0.02, task="static"
         )

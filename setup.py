@@ -1,11 +1,11 @@
 from setuptools import find_packages, setup
 
 setup(
-    name="coral",
-    version="0.2.0",
-    description="Package for Coordinate-based network for OpeRAtor Learning",
-    author="Louis Serrano",
-    author_email="louis.serrano@isir.upmc.fr",
+    name="marble",
+    version="1.0.0",
+    description="Package for EXPLORING SPATIAL MODULATION FOR NEURAL FIELDS IN PDE MODELING",
+    author="LeapLabTHU",
+    author_email="wanghh20@mails.tsinghua.edu.cn",
     install_requires=[
         "einops",
         "hydra-core",
