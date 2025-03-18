@@ -34,7 +34,7 @@ export MINICONDA_PATH=your_anaconda_path
 ```
 
 ## Data preparation 
-* Dynamics Modeling: NS and SW data can be generated using [DINo](https://github.com/mkirchmeyer/DINo) repo. We provide the generated data in `data/dynamics`.
+* Dynamics Modeling: NS and SW data can be generated using [DINo](https://github.com/mkirchmeyer/DINo) repo. We provide the generated data in [google drive](https://drive.google.com/drive/folders/1R9UlelzGbjMzU8v--LivQE_WJe02ppMU?usp=sharing).
 * Geometric-aware inference: NACA-Euler, Elasticity and pipe data can be downloaded from [google drive](https://drive.google.com/drive/folders/1YBuaoTdOSr_qzaow-G-iwvbUI7fiUzu8), which is provided by [Geo-FNO](https://github.com/neuraloperator/Geo-FNO.git) repo.
 
 
